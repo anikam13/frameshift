@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport"/>
+<title>Boyfriend Camera - Composing</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=Courier+Prime&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-primary": "#1c0b9f",
+                    "on-secondary-container": "#003a11",
+                    "error-container": "#93000a",
+                    "secondary-fixed-dim": "#53e16f",
+                    "on-primary-fixed": "#0c006a",
+                    "on-tertiary-fixed": "#301400",
+                    "inverse-surface": "#e5e2e1",
+                    "inverse-on-surface": "#313030",
+                    "surface-tint": "#c2c1ff",
+                    "surface-container-high": "#2a2a2a",
+                    "surface-dim": "#131313",
+                    "tertiary": "#ffb785",
+                    "secondary": "#53e16f",
+                    "surface": "#131313",
+                    "outline-variant": "#464554",
+                    "primary-container": "#5856d6",
+                    "on-secondary-fixed-variant": "#00531c",
+                    "surface-container-highest": "#353534",
+                    "primary-fixed": "#e2dfff",
+                    "on-surface-variant": "#c7c4d6",
+                    "tertiary-fixed": "#ffdcc6",
+                    "tertiary-fixed-dim": "#ffb785",
+                    "secondary-container": "#05b046",
+                    "on-primary-fixed-variant": "#3631b4",
+                    "inverse-primary": "#4f4ccd",
+                    "on-error-container": "#ffdad6",
+                    "primary": "#c2c1ff",
+                    "on-tertiary": "#502500",
+                    "secondary-fixed": "#72fe88",
+                    "on-secondary": "#003911",
+                    "surface-container-low": "#1c1b1b",
+                    "on-secondary-fixed": "#002107",
+                    "surface-bright": "#393939",
+                    "surface-container-lowest": "#0e0e0e",
+                    "on-tertiary-fixed-variant": "#713700",
+                    "on-primary-container": "#e7e4ff",
+                    "on-background": "#e5e2e1",
+                    "outline": "#918f9f",
+                    "surface-container": "#201f1f",
+                    "background": "#131313",
+                    "tertiary-container": "#a25100",
+                    "on-tertiary-container": "#ffe1cf",
+                    "primary-fixed-dim": "#c2c1ff",
+                    "error": "#ffb4ab",
+                    "surface-variant": "#353534",
+                    "on-surface": "#e5e2e1",
+                    "on-error": "#690005"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.125rem",
+                    "lg": "0.25rem",
+                    "xl": "0.5rem",
+                    "full": "0.75rem"
+            },
+            "spacing": {
+                    "card-padding": "16px",
+                    "component-gap": "8px",
+                    "margin-side": "20px",
+                    "safe-area-bottom": "34px",
+                    "hairline": "0.5px"
+            },
+            "fontFamily": {
+                    "wordmark": ["Inter"],
+                    "body": ["Inter"],
+                    "value-mono": ["Courier Prime"],
+                    "label-caps": ["Inter"],
+                    "micro": ["Inter"],
+                    "cta": ["Inter"],
+                    "screen-title": ["Inter"]
+            },
+            "fontSize": {
+                    "wordmark": ["15px", {"lineHeight": "20px", "fontWeight": "500"}],
+                    "body": ["15px", {"lineHeight": "20px", "fontWeight": "400"}],
+                    "value-mono": ["14px", {"lineHeight": "18px", "fontWeight": "400"}],
+                    "label-caps": ["12px", {"lineHeight": "16px", "letterSpacing": "0.06em", "fontWeight": "600"}],
+                    "micro": ["11px", {"lineHeight": "14px", "fontWeight": "500"}],
+                    "cta": ["16px", {"lineHeight": "20px", "fontWeight": "600"}],
+                    "screen-title": ["17px", {"lineHeight": "22px", "fontWeight": "600"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        body {
+            background-color: #000000;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .grid-line {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+        .bounding-box-corner {
+            border-color: #ffffff;
+            width: 20px;
+            height: 20px;
+        }
+        .shutter-inner {
+            transition: transform 0.1s ease-out;
+        }
+        .shutter-btn:active .shutter-inner {
+            transform: scale(0.9);
+        }
+        .glass-overlay {
+            backdrop-filter: blur(24px);
+            background: rgba(19, 19, 19, 0.6);
+        }
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="font-body text-on-surface select-none">
+<!-- Viewfinder Main Container -->
+<main class="relative w-full h-full flex flex-col">
+<!-- Camera Feed Background -->
+<div class="absolute inset-0 z-0">
+<img class="w-full h-full object-cover" data-alt="A professional high-fashion portrait of a young man standing in a sun-drenched coastal landscape during the golden hour. He is wearing a minimalist linen shirt, looking slightly away from the camera. The background shows blurred cliffs and a soft blue sea, creating a cinematic, high-end lifestyle aesthetic with warm, natural lighting and deep contrast. The composition is balanced and elegant, echoing a luxury fashion editorial." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBlk3WhlxU_8CSf9pVbnNfxUC-1XnxaatQRtTce_SUMsDUZAgln1g5rmlYC5Kn5wtDOOvDAGzEsIlgszzDWM2LpTnIkGsq8nGjP94df96NVo90qTC1lhEe1iAqSDIPh4KLC4DQ5p8D8SNjr4k9cr_6B7M4S3ETd06Jj-_irbr9fGMv8e-Pni3fqjyfM8dE4L1dZsXzh0jdccn4_iOXDndR-SAE_jlqS8DKgymJkc8c_rwtUeYHmWE7HvjTeAvbllauimMTH0g69CRA"/>
+</div>
+<!-- Rule of Thirds Grid -->
+<div class="absolute inset-0 z-10 pointer-events-none">
+<div class="grid-line absolute top-1/3 left-0 w-full h-[0.5px]"></div>
+<div class="grid-line absolute top-2/3 left-0 w-full h-[0.5px]"></div>
+<div class="grid-line absolute left-1/3 top-0 h-full w-[0.5px]"></div>
+<div class="grid-line absolute left-2/3 top-0 h-full w-[0.5px]"></div>
+</div>
+<!-- Bounding Box (Centered on Subject) -->
+<div class="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+<div class="relative w-48 h-64 border-[0.5px] border-white/20">
+<!-- Top Left -->
+<div class="absolute -top-[1px] -left-[1px] w-4 h-4 border-t-2 border-l-2 border-white rounded-tl-[2px]"></div>
+<!-- Top Right -->
+<div class="absolute -top-[1px] -right-[1px] w-4 h-4 border-t-2 border-r-2 border-white rounded-tr-[2px]"></div>
+<!-- Bottom Left -->
+<div class="absolute -bottom-[1px] -left-[1px] w-4 h-4 border-b-2 border-l-2 border-white rounded-bl-[2px]"></div>
+<!-- Bottom Right -->
+<div class="absolute -bottom-[1px] -right-[1px] w-4 h-4 border-b-2 border-r-2 border-white rounded-br-[2px]"></div>
+</div>
+</div>
+<!-- Level Indicator (Right Edge) -->
+<div class="absolute right-0 top-1/2 -translate-y-1/2 z-20 pr-2">
+<div class="w-8 h-[2px] bg-on-surface-variant/50"></div>
+</div>
+<!-- Top Controls Overlay -->
+<header class="relative z-30 px-margin-side pt-12 flex items-start justify-between w-full pointer-events-none">
+<!-- Back Button -->
+<button class="pointer-events-auto p-2 bg-black/20 rounded-full backdrop-blur-md active:scale-90 transition-transform">
+<span class="material-symbols-outlined text-on-surface text-[24px]">arrow_back</span>
+</button>
+<!-- Tip Pill -->
+<div class="glass-overlay px-4 py-2 rounded-full pointer-events-auto">
+<span class="font-micro text-micro text-white uppercase tracking-widest">Move back a step</span>
+</div>
+<!-- Grid Toggle -->
+<button class="pointer-events-auto p-2 bg-black/20 rounded-full backdrop-blur-md active:scale-90 transition-transform">
+<span class="material-symbols-outlined text-secondary text-[24px]">grid_on</span>
+</button>
+</header>
+<!-- Bottom UI Area -->
+<footer class="mt-auto relative z-30 w-full flex flex-col">
+<!-- Reference Strip (Glass) -->
+<div class="glass-overlay w-full py-4 mb-4">
+<div class="flex items-center gap-3 px-margin-side overflow-x-auto hide-scrollbar">
+<!-- Thumb 1 -->
+<div class="flex-shrink-0 w-11 h-11 bg-surface-container-highest rounded-[2px] overflow-hidden opacity-60">
+<img class="w-full h-full object-cover" data-alt="A small square thumbnail showing a person in a minimalist urban setting, soft lighting, professional aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCnSv_MJVrhdnmzQp-s7IB6ajROElwD_daYHUjC1KcdAQBKe57-gic6F83aJbXF2UdgvnE3yLmhQvAV1SWqZy7vo68Y-zXvoBBToFE3qzXiIMVVUUkT2GTLvd4Rq1N-T9-qP7KudKiFtK7dGB2F_u8mMH6pYuURmKmrs-6kAPCzSr0Xx9xG-UNsRm3BoA_ZUeUmLtTJDhRHssrg7ElosvBEVty-myo4hRcq8nnx3ResiSLt_VbhIAT8q2RTAR9br_MG9bJAwoj-N5s"/>
+</div>
+<!-- Thumb 2 (Active) -->
+<div class="flex-shrink-0 w-11 h-11 bg-surface-container-highest rounded-[2px] overflow-hidden border-2 border-secondary scale-110 shadow-lg">
+<img class="w-full h-full object-cover" data-alt="A small square thumbnail of a model in nature, golden hour lighting, technical high-end camera look." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCEaNYmH70uvS-5PVX7cKWWVGqYTWSJTiiIvO6saM-xvQq6jt_LAmIkvopQzKRL6dLweDRNRN5_zSoNXvv8PDHTz7qQdcwb-houp-LfAVAVyi0ykkguDTqY89N4eI5EOL9d6EnxLS-jUyfM0K7lBZhULANvhYKVBw7fO5myhP68kcAUgBvYerqRknTV_VAb-6aI1NBeAnUBJsw8Ti3Bif_DwFqCarJ_asB_8rjsz38y39qgDPodBKARiNjiUESnBezOTEZ4eiEj_8M"/>
+</div>
+<!-- Thumb 3 -->
+<div class="flex-shrink-0 w-11 h-11 bg-surface-container-highest rounded-[2px] overflow-hidden opacity-60">
+<img class="w-full h-full object-cover" data-alt="A small square thumbnail showing architectural details in high contrast black and white." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDR3aPPdOqK9sAav_DyCx8lYfova9Lgcuhr4b-Xz10Gv4dmdWIBJq5kpDc3CQ74eG39Et8z1pcDSggLL_LkNqk6-I-5kZZ3azMoVtfVn-7BwKPRVwm25KLrWILVGT9FPv_DIM9052Bhfo-qsnPRzmiX0_zrCrqcu0TU0i8KzMWbmQV96Aca4aaUxQPbL-aSyUUSDc5c0v0018z-gFlEnJ5snIJ5Jv8OuDGG2gsX5nJq4g8VwJm_N8kqkqY3Dagv9itHJADlTSG2hsU"/>
+</div>
+<!-- Thumb 4 -->
+<div class="flex-shrink-0 w-11 h-11 bg-surface-container-highest rounded-[2px] overflow-hidden opacity-60">
+<img class="w-full h-full object-cover" data-alt="A small square thumbnail of a sunset landscape with high dynamic range." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAA2afWMK0NmFriurQvwAQuhwuPPAo_fIru2mv-bup1XNcjf8fnI0u4Pz82GZSTTR7XbWQvgzkx9lCfnCSDz887qfZNprl9D-215OhhcW6u6jtF_VubWyESz0jkkKJTsAITU0zgPpva8e5D4yQL1pMiHwbTu8Ii6hgCkYDa45B30qfBi3Jhw0mci3kZFYH2F-fPRoMeJqwIm70BgJ_ZVjRDlcmDiH7JjXfRWZmboghUKgRJKDxl62_V9_lGD_uO8szbPqp6CB47cis"/>
+</div>
+<!-- Thumb 5 -->
+<div class="flex-shrink-0 w-11 h-11 bg-surface-container-highest rounded-[2px] overflow-hidden opacity-60">
+<img class="w-full h-full object-cover" data-alt="A small square thumbnail of a high-fashion accessory, macro photography." src="https://lh3.googleusercontent.com/aida-public/AB6AXuB8oAqBNSX9pX9JHnu0OVy1NNemBuESKJW5q9Bp9T3LgUzFaZiazlnTNYsaWeZUfVe1bdsVScx3eTNGc_CU6r8AnVwKzE4nA3e95V0Aa-wEA6GYuHb3BTNkw1lr3OY0vWKhyXiXZQNrBrRFTDzDqeLX0QXWPEZhf5ewxCvT1dIOQedJN3krUsthcBcc90qbr3XJ2eJxt34i59_U7SgL6gf0u7JZ-AX3NUArjuhViJx2IydlolxCD4ZZeSgFHIplBRAir5b33eGe1pw"/>
+</div>
+<!-- Thumb 6 -->
+<div class="flex-shrink-0 w-11 h-11 bg-surface-container-highest rounded-[2px] overflow-hidden opacity-60">
+<img class="w-full h-full object-cover" data-alt="A small square thumbnail of a street photography scene in Tokyo, neon lights." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBxQOnCa-JbimcGyeXN-WgbVlmcKTkYJ1_7_8BoR4NNscdo5NsB8Jbwr5e9yxn4G7H2f66xAwPa6qd9K_SNFxyqo0mlyIlSD0iuegmtKKNUYeXVGTu4nmh3X-sZLD-ynrfiu4oGtGKT7jqCbkbska4q9lFDpjLa4yukMFyYYldAP_HwEHfA1PLBI9A07gzbFmlQiLPbUM5qFyAiPiCJJLJ5gCvCYQYIpZtErDyuWCtMx5-PmrWy76R0A0HTdUjteo7wq3VFXiLM9io"/>
+</div>
+</div>
+</div>
+<!-- Shutter Control Area (Pure Black) -->
+<div class="bg-black h-[100px] w-full flex items-center justify-between px-margin-side pb-safe-area-bottom">
+<!-- Gallery Preview -->
+<div class="w-12 h-12 rounded-full overflow-hidden border border-outline-variant/30 active:scale-95 transition-transform">
+<img class="w-full h-full object-cover" data-alt="The most recent photo in the gallery, a candid portrait of a person laughing outdoors, professional depth of field." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBM5KdTTZZB-jCp-t1crJzTaaaK3-vJ2ijv4Vi3PbcByniO_nX4ZlfOIV3-VcMwdRF9BQjGWQjp7_ggoqsZSkKfnrukMStWz1t43FXHdp9GG2DZmfUJYfbyhsczC2gHOBVg8kY2aar5EHHcgK4C7XtwdQT1E96-AQ22Y2-ZJN0jxExT5rx5Fz0QnkoA2b1G5j5-Sc0H3-86HyOkkoLLElVZEowtAYKxhOtG55CFAO1oB02Mg2vsxYHbEngv-J_CBY9BE54flmE5__I"/>
+</div>
+<!-- Shutter Button -->
+<button class="shutter-btn group relative flex items-center justify-center w-[72px] h-[72px]">
+<div class="absolute inset-0 border-[3px] border-white rounded-full"></div>
+<div class="shutter-inner w-[60px] h-[60px] bg-white rounded-full active:scale-90 transition-transform"></div>
+</button>
+<!-- Switch Camera -->
+<button class="w-12 h-12 flex items-center justify-center rounded-full bg-surface-container/20 text-on-surface active:rotate-180 transition-transform duration-500">
+<span class="material-symbols-outlined text-[24px]">flip_camera_ios</span>
+</button>
+</div>
+</footer>
+</main>
+<!-- Micro-interactions Script -->
+<script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const shutterBtn = document.querySelector('.shutter-btn');
+            
+            shutterBtn.addEventListener('click', () => {
+                // Subtle haptic feel through flash
+                const flash = document.createElement('div');
+                flash.className = 'fixed inset-0 bg-white z-[100] pointer-events-none opacity-0';
+                document.body.appendChild(flash);
+                
+                // Animation timeline
+                flash.animate([
+                    { opacity: 0 },
+                    { opacity: 0.4 },
+                    { opacity: 0 }
+                ], {
+                    duration: 150,
+                    easing: 'ease-out'
+                });
+
+                setTimeout(() => flash.remove(), 200);
+            });
+
+            // Smooth scroll for thumbnails
+            const strip = document.querySelector('.overflow-x-auto');
+            strip.addEventListener('wheel', (e) => {
+                if (e.deltaY !== 0) {
+                    e.preventDefault();
+                    strip.scrollLeft += e.deltaY;
+                }
+            });
+        });
+    </script>
+</body></html>

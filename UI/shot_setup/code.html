@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&amp;family=Courier+Prime&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        body {
+            -webkit-tap-highlight-color: transparent;
+            font-family: 'Inter', sans-serif;
+            background-color: #f9f9fb;
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 0.5px solid rgba(255, 255, 255, 0.4);
+        }
+        .haptic-feedback:active {
+            transform: scale(0.96);
+        }
+        .focus-ring-animate {
+            animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse-ring {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.05); }
+        }
+        .shimmer {
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+        }
+        @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "tertiary": "#7e3e00",
+                        "secondary-fixed-dim": "#d2c4b6",
+                        "interface-gray": "#8E8E93",
+                        "on-tertiary-fixed": "#301400",
+                        "primary-fixed": "#e2dfff",
+                        "action-indigo": "#5856D6",
+                        "surface-container": "#eeeef0",
+                        "on-surface": "#1a1c1d",
+                        "surface-container-lowest": "#ffffff",
+                        "error": "#ba1a1a",
+                        "primary": "#3f3bbd",
+                        "on-surface-variant": "#464554",
+                        "outline-variant": "#c7c4d6",
+                        "on-primary-fixed-variant": "#3631b4",
+                        "on-error-container": "#93000a",
+                        "surface": "#f9f9fb",
+                        "on-primary-container": "#e7e4ff",
+                        "on-secondary-fixed": "#221a12",
+                        "on-tertiary-container": "#ffe1cf",
+                        "primary-container": "#5856d6",
+                        "on-tertiary-fixed-variant": "#713700",
+                        "tertiary-fixed-dim": "#ffb785",
+                        "tertiary-fixed": "#ffdcc6",
+                        "on-secondary-fixed-variant": "#4f453b",
+                        "surface-container-high": "#e8e8ea",
+                        "secondary-container": "#efe0d1",
+                        "error-container": "#ffdad6",
+                        "surface-tint": "#4f4ccd",
+                        "surface-container-highest": "#e2e2e4",
+                        "outline": "#777585",
+                        "premium-gold": "#D4AF37",
+                        "surface-bright": "#f9f9fb",
+                        "on-error": "#ffffff",
+                        "surface-variant": "#e2e2e4",
+                        "inverse-surface": "#2f3132",
+                        "on-tertiary": "#ffffff",
+                        "secondary-fixed": "#efe0d1",
+                        "camera-black": "#000000",
+                        "on-primary-fixed": "#0c006a",
+                        "surface-dim": "#d9dadc",
+                        "tertiary-container": "#a25100",
+                        "surface-container-low": "#f3f3f5",
+                        "on-primary": "#ffffff",
+                        "inverse-on-surface": "#f0f0f2",
+                        "background": "#f9f9fb",
+                        "on-background": "#1a1c1d",
+                        "on-secondary-container": "#6d6357",
+                        "primary-fixed-dim": "#c2c1ff",
+                        "inverse-primary": "#c2c1ff",
+                        "secondary": "#675d51",
+                        "on-secondary": "#ffffff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "margin-main": "20px",
+                        "control-gap": "8px",
+                        "safe-area-bottom": "34px",
+                        "gutter": "12px"
+                    },
+                    "fontFamily": {
+                        "label-caps": ["Inter"],
+                        "headline-lg-mobile": ["Inter"],
+                        "display-xl": ["Inter"],
+                        "headline-lg": ["Inter"],
+                        "mono-value": ["Courier Prime"],
+                        "body-md": ["Inter"]
+                    },
+                    "fontSize": {
+                        "label-caps": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}],
+                        "headline-lg-mobile": ["24px", {"lineHeight": "30px", "fontWeight": "600"}],
+                        "display-xl": ["40px", {"lineHeight": "48px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                        "headline-lg": ["28px", {"lineHeight": "34px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                        "mono-value": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "body-md": ["17px", {"lineHeight": "24px", "fontWeight": "400"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-surface flex flex-col min-h-screen">
+<!-- Top Navigation Anchor -->
+<nav class="fixed top-0 w-full z-50 bg-transparent backdrop-blur-xl flex justify-between items-center px-margin-main h-14">
+<button class="flex items-center justify-center w-10 h-10 hover:opacity-80 transition-opacity active:scale-95 duration-150">
+<span class="material-symbols-outlined text-primary text-2xl" data-icon="arrow_back_ios_new">arrow_back_ios_new</span>
+</button>
+<h1 class="font-headline-lg-mobile text-headline-lg-mobile font-bold text-on-surface">Shot Setup</h1>
+<button class="flex items-center justify-center w-10 h-10 hover:opacity-80 transition-opacity active:scale-95 duration-150">
+<span class="material-symbols-outlined text-primary text-2xl" data-icon="settings">settings</span>
+</button>
+</nav>
+<main class="flex-grow pt-20 pb-safe-area-bottom px-margin-main space-y-8 overflow-y-auto">
+<!-- Analysis Section -->
+<section class="relative">
+<div class="flex items-center space-x-6">
+<div class="relative w-32 h-40 rounded-xl overflow-hidden shadow-sm flex-shrink-0 border border-outline-variant/30">
+<img class="w-full h-full object-cover" data-alt="A professional vertical portrait photograph of a model in a urban minimalist setting, soft natural side lighting, high fashion aesthetic, deep depth of field, cool neutral tones, crisp detail and clean composition for a high-end photography app interface." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDYCJuo1T8WW2g0yNBJkBF_HqxgMvmRtaQMczN-alwbLDrzCWzxP-ECeRpuVzX0KDfzGd6FGNYU1PbsRCyaJjV7IzqKQDlQxBwO7cfUyy-zgTI0niSVObBTG8Irmvf6jWNGADQDVLbH-CboVSwt2nbKszczNG7Up2CJIUMkxLfw7nm_gieullj5uGmLuh2PK37MudbXrIOJGo9OMx69XVaSoeo4DA7Gio8o15zjuaishtQN_WK_GEMaeGiXqcrqogTdsyUT-0VjzQVa"/>
+<div class="absolute inset-0 bg-gradient-to-t from-camera-black/40 to-transparent"></div>
+</div>
+<div class="space-y-3">
+<div class="inline-flex items-center px-3 py-1 rounded-full bg-action-indigo/10 text-action-indigo border border-action-indigo/20">
+<span class="w-2 h-2 rounded-full bg-action-indigo mr-2 focus-ring-animate"></span>
+<span class="font-label-caps text-label-caps tracking-wider">Analysis Complete</span>
+</div>
+<p class="font-body-md text-body-md text-on-surface-variant max-w-[200px]">We've mapped the reference's geometry to your current environment.</p>
+</div>
+</div>
+</section>
+<!-- Shot Spec Bento Grid -->
+<section class="space-y-4">
+<h2 class="font-label-caps text-label-caps text-interface-gray tracking-widest uppercase">Shot Specs</h2>
+<div class="grid grid-cols-2 gap-control-gap">
+<!-- Metric 1: Distance -->
+<div class="glass-card p-4 rounded-xl flex flex-col justify-between aspect-square">
+<span class="material-symbols-outlined text-action-indigo text-3xl" data-icon="straighten">straighten</span>
+<div>
+<div class="font-label-caps text-label-caps text-interface-gray">Distance</div>
+<div class="font-mono-value text-xl font-bold text-on-surface">3.2m</div>
+</div>
+</div>
+<!-- Metric 2: Tilt -->
+<div class="glass-card p-4 rounded-xl flex flex-col justify-between aspect-square">
+<span class="material-symbols-outlined text-action-indigo text-3xl" data-icon="screen_rotation">screen_rotation</span>
+<div>
+<div class="font-label-caps text-label-caps text-interface-gray">Tilt</div>
+<div class="font-mono-value text-xl font-bold text-on-surface">0°</div>
+</div>
+</div>
+<!-- Metric 3: Light -->
+<div class="glass-card p-4 rounded-xl flex flex-col justify-between aspect-square">
+<span class="material-symbols-outlined text-action-indigo text-3xl" data-icon="wb_sunny">wb_sunny</span>
+<div>
+<div class="font-label-caps text-label-caps text-interface-gray">Light</div>
+<div class="font-mono-value text-lg font-bold text-on-surface">Side-lit</div>
+</div>
+</div>
+<!-- Metric 4: Zoom -->
+<div class="glass-card p-4 rounded-xl flex flex-col justify-between aspect-square">
+<span class="material-symbols-outlined text-action-indigo text-3xl" data-icon="zoom_in">zoom_in</span>
+<div>
+<div class="font-label-caps text-label-caps text-interface-gray">Zoom</div>
+<div class="font-mono-value text-xl font-bold text-on-surface">1.0x</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Suggested Poses -->
+<section class="space-y-4 pb-12">
+<h2 class="font-label-caps text-label-caps text-interface-gray tracking-widest uppercase">Suggested Poses</h2>
+<div class="space-y-3">
+<!-- Pose Card 1 -->
+<div class="glass-card overflow-hidden rounded-xl h-24 flex items-center p-3 space-x-4 haptic-feedback transition-transform">
+<div class="w-16 h-16 rounded-lg bg-surface-container-high overflow-hidden flex-shrink-0">
+<img class="w-full h-full object-cover" data-alt="A clean, minimalist vector illustration of a human silhouette leaning casually against a textured concrete wall, looking away from the camera, professional photography pose guide, soft gray tones, action indigo highlights, clean linework." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBXrGWosIwgJHFnNd_qrDAgEY_Wglc_4reS4CZ6yNvRLBjrK9GekEc-IVl9eF_2swz6XwiGRxklu_HmN3K1_Ap1sgjixFqIpsMvDFyc0ILHu6xLjLh6jLM3twP9aFUxpIRm7eJSwaHbIk7ZChnf_DYshm6Nza1lpHbOECO7wpC9Xdl0vgByVLSj7F3EzQP_du5G1iaM2r5gIENqrpjt-CguxdDbmECL8PpcqvfampXw10xTFIl1UGXgFS08M1TDhqfPLI7NSxodmcmT"/>
+</div>
+<div class="flex-grow">
+<h3 class="font-body-md text-on-surface font-semibold">The Wall Lean</h3>
+<p class="font-label-caps text-interface-gray">Leaning against wall, look away</p>
+</div>
+<span class="material-symbols-outlined text-outline-variant" data-icon="chevron_right">chevron_right</span>
+</div>
+<!-- Pose Card 2 -->
+<div class="glass-card overflow-hidden rounded-xl h-24 flex items-center p-3 space-x-4 haptic-feedback transition-transform">
+<div class="w-16 h-16 rounded-lg bg-surface-container-high overflow-hidden flex-shrink-0">
+<img class="w-full h-full object-cover" data-alt="A clean, minimalist vector illustration of a human silhouette walking toward the camera while adjusting their jacket, dynamic fashion pose guide, professional photography app style, soft gray and white color palette." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDFllExVAfLQVaGoFYfKplO9kntb8VmqgNVc4WlRsT6xgdl0AjpmuzhkslLvLFIA8ndlqBc3dAXqw0TBM7K5R89YQL46yFGRm8ZhAJ245aVYy6WU00z1HkxaMCkBA2Bx-TsOvdWpHvXSm9hOdeQKYchYJwviVGgOC9bIxfun3AztdKdLDoBJbabLXkEdYPSi-UV-C2dIhkSlf3RMuVNV8q7x7i4jyDPGr6P1SsJNC-XxkW225kekN5obBPABwpuNvLBhTW-oitZTxJp"/>
+</div>
+<div class="flex-grow">
+<h3 class="font-body-md text-on-surface font-semibold">Candid Walk</h3>
+<p class="font-label-caps text-interface-gray">Walking forward, adjust jacket</p>
+</div>
+<span class="material-symbols-outlined text-outline-variant" data-icon="chevron_right">chevron_right</span>
+</div>
+</div>
+</section>
+</main>
+<!-- Bottom Action Shell -->
+<div class="fixed bottom-0 w-full bg-transparent backdrop-blur-3xl px-margin-main pb-safe-area-bottom pt-4 z-50">
+<button class="w-full h-14 bg-action-indigo text-white rounded-xl font-headline-lg-mobile text-headline-lg-mobile font-bold flex items-center justify-center space-x-2 active:scale-95 transition-transform duration-150 shadow-xl shadow-action-indigo/20">
+<span class="material-symbols-outlined" data-icon="photo_camera">photo_camera</span>
+<span>Start Shooting</span>
+</button>
+</div>
+<!-- Hidden Bottom Nav for top-level context adherence (suppressed per rules for transactional screen but present if user navigates back) -->
+<!-- The prompt implies a focused flow, so the BottomNavBar is suppressed to prioritize content canvas as per "The UX Goal" rule. -->
+<script>
+        // Micro-interactions for the cards
+        document.querySelectorAll('.glass-card').forEach(card => {
+            card.addEventListener('touchstart', () => {
+                card.style.backgroundColor = 'rgba(255, 255, 255, 0.9)';
+            });
+            card.addEventListener('touchend', () => {
+                card.style.backgroundColor = 'rgba(255, 255, 255, 0.7)';
+            });
+        });
+        
+        // Simple entry animation
+        window.addEventListener('DOMContentLoaded', () => {
+            const main = document.querySelector('main');
+            main.style.opacity = '0';
+            main.style.transform = 'translateY(10px)';
+            main.style.transition = 'all 0.6s cubic-bezier(0.16, 1, 0.3, 1)';
+            
+            setTimeout(() => {
+                main.style.opacity = '1';
+                main.style.transform = 'translateY(0)';
+            }, 100);
+        });
+    </script>
+</body></html>

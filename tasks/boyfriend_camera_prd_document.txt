@@ -1,0 +1,27 @@
+Boyfriend Camera — Product Requirements Document
+Version: 0.1 (MVP) Status: Draft Last Updated: June 2026
+
+1. Problem Statement
+Most people take mediocre photos of their partners — not because they lack taste, but because they lack spatial awareness in the moment. They don't know how far to stand, how to hold the camera, where the light is coming from, or how to frame the shot. Existing solutions are either too complex (Halide, ProCamera) or too passive (native camera grid). No app closes the feedback loop in real time, in a beginner-friendly way, around the specific use case of photographing someone you're with.
+
+2. Target User
+Primary: People who regularly photograph a significant other and are frustrated by the results — not photographers, not content creators, not professionals. Users who know what a good photo looks like but don't know how to take one.
+Platform: iOS only, iPhone 12 and newer (required for Vision framework performance and LiDAR availability on Pro models).
+
+3. Goals
+- Ship a v1 to the App Store that solves one thing exceptionally well: helping a beginner take a noticeably better photo of their partner using a reference as a guide
+- Establish a shareable output loop (before/after) that drives organic growth
+- Validate willingness to pay before building v2
+
+5. Core Features
+5.1 Reference Selection & Analysis: Pick reference, analyze once (framing, tilt, distance, light).
+5.2 Pose Suggestion (Setup Phase): 2-3 poses from curated library.
+5.3 Live Shoot Mode: Real-time directional nudges (arrows, indicators) for framing, tilt, height, light.
+5.4 Before/After Export Card: Shareable side-by-side card.
+
+7. User Flow
+- Onboarding
+- Reference selection screen
+- Setup screen (Shot spec + Pose cards)
+- Live camera (Nudges)
+- Post-shot screen (Export card)

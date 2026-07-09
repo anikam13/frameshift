@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "tertiary": "#7e3e00",
+                        "secondary-fixed-dim": "#d2c4b6",
+                        "interface-gray": "#8E8E93",
+                        "on-tertiary-fixed": "#301400",
+                        "primary-fixed": "#e2dfff",
+                        "action-indigo": "#5856D6",
+                        "surface-container": "#eeeef0",
+                        "on-surface": "#1a1c1d",
+                        "surface-container-lowest": "#ffffff",
+                        "error": "#ba1a1a",
+                        "primary": "#3f3bbd",
+                        "on-surface-variant": "#464554",
+                        "outline-variant": "#c7c4d6",
+                        "on-primary-fixed-variant": "#3631b4",
+                        "on-error-container": "#93000a",
+                        "surface": "#f9f9fb",
+                        "on-primary-container": "#e7e4ff",
+                        "on-secondary-fixed": "#221a12",
+                        "on-tertiary-container": "#ffe1cf",
+                        "primary-container": "#5856d6",
+                        "on-tertiary-fixed-variant": "#713700",
+                        "tertiary-fixed-dim": "#ffb785",
+                        "tertiary-fixed": "#ffdcc6",
+                        "on-secondary-fixed-variant": "#4f453b",
+                        "surface-container-high": "#e8e8ea",
+                        "secondary-container": "#efe0d1",
+                        "error-container": "#ffdad6",
+                        "surface-tint": "#4f4ccd",
+                        "surface-container-highest": "#e2e2e4",
+                        "outline": "#777585",
+                        "premium-gold": "#D4AF37",
+                        "surface-bright": "#f9f9fb",
+                        "on-error": "#ffffff",
+                        "surface-variant": "#e2e2e4",
+                        "inverse-surface": "#2f3132",
+                        "on-tertiary": "#ffffff",
+                        "secondary-fixed": "#efe0d1",
+                        "camera-black": "#000000",
+                        "on-primary-fixed": "#0c006a",
+                        "surface-dim": "#d9dadc",
+                        "tertiary-container": "#a25100",
+                        "surface-container-low": "#f3f3f5",
+                        "on-primary": "#ffffff",
+                        "inverse-on-surface": "#f0f0f2",
+                        "background": "#f9f9fb",
+                        "on-background": "#1a1c1d",
+                        "on-secondary-container": "#6d6357",
+                        "primary-fixed-dim": "#c2c1ff",
+                        "inverse-primary": "#c2c1ff",
+                        "secondary": "#675d51",
+                        "on-secondary": "#ffffff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "margin-main": "20px",
+                        "control-gap": "8px",
+                        "safe-area-bottom": "34px",
+                        "gutter": "12px"
+                    },
+                    "fontFamily": {
+                        "label-caps": ["Inter"],
+                        "headline-lg-mobile": ["Inter"],
+                        "display-xl": ["Inter"],
+                        "headline-lg": ["Inter"],
+                        "mono-value": ["courierPrime"],
+                        "body-md": ["Inter"]
+                    },
+                    "fontSize": {
+                        "label-caps": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}],
+                        "headline-lg-mobile": ["24px", {"lineHeight": "30px", "fontWeight": "600"}],
+                        "display-xl": ["40px", {"lineHeight": "48px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                        "headline-lg": ["28px", {"lineHeight": "34px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                        "mono-value": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "body-md": ["17px", {"lineHeight": "24px", "fontWeight": "400"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            display: inline-block;
+            vertical-align: middle;
+        }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        .masonry-grid {
+            column-count: 2;
+            column-gap: 12px;
+        }
+        .masonry-item {
+            break-inside: avoid;
+            margin-bottom: 12px;
+        }
+        
+        .glass-card {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+
+        .active-scale:active {
+            transform: scale(0.95);
+            transition: transform 0.1s ease;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-background font-body-md text-body-md antialiased selection:bg-action-indigo/30">
+<!-- TopAppBar -->
+<header class="fixed top-0 w-full z-50 bg-white/10 dark:bg-black/20 backdrop-blur-md">
+<div class="flex justify-between items-center px-margin-main h-14 w-full">
+<button class="active:scale-95 transition-transform duration-150 text-primary dark:text-primary-fixed-dim">
+<span class="material-symbols-outlined">arrow_back_ios_new</span>
+</button>
+<h1 class="font-headline-lg-mobile text-headline-lg-mobile font-bold text-on-surface dark:text-surface-bright">
+                Boyfriend Camera
+            </h1>
+<button class="active:scale-95 transition-transform duration-150 text-primary dark:text-primary-fixed-dim">
+<span class="material-symbols-outlined">settings</span>
+</button>
+</div>
+</header>
+<main class="pt-14 pb-32">
+<!-- Search & Filter Section -->
+<div class="sticky top-14 z-40 bg-background/80 backdrop-blur-xl px-margin-main py-4 space-y-4">
+<!-- Search Bar -->
+<div class="relative group">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-interface-gray group-focus-within:text-action-indigo transition-colors">search</span>
+<input class="w-full h-11 pl-10 pr-4 bg-surface-container border-none rounded-xl focus:ring-2 focus:ring-action-indigo/20 text-body-md outline-none transition-all" placeholder="Search poses or locations..." type="text"/>
+</div>
+<!-- Category Pills -->
+<div class="flex gap-2 overflow-x-auto hide-scrollbar -mx-margin-main px-margin-main">
+<button class="whitespace-nowrap px-5 py-2 rounded-full bg-action-indigo text-white font-semibold text-label-caps active-scale">All</button>
+<button class="whitespace-nowrap px-5 py-2 rounded-full bg-surface-container text-on-surface-variant font-semibold text-label-caps hover:bg-surface-container-high transition-colors active-scale">Portraits</button>
+<button class="whitespace-nowrap px-5 py-2 rounded-full bg-surface-container text-on-surface-variant font-semibold text-label-caps hover:bg-surface-container-high transition-colors active-scale">Cafe</button>
+<button class="whitespace-nowrap px-5 py-2 rounded-full bg-surface-container text-on-surface-variant font-semibold text-label-caps hover:bg-surface-container-high transition-colors active-scale">Golden Hour</button>
+<button class="whitespace-nowrap px-5 py-2 rounded-full bg-surface-container text-on-surface-variant font-semibold text-label-caps hover:bg-surface-container-high transition-colors active-scale">Urban</button>
+<button class="whitespace-nowrap px-5 py-2 rounded-full bg-surface-container text-on-surface-variant font-semibold text-label-caps hover:bg-surface-container-high transition-colors active-scale">Beach</button>
+</div>
+</div>
+<!-- Reference Grid -->
+<div class="px-margin-main mt-2">
+<div class="masonry-grid">
+<!-- Item 1 -->
+<div class="masonry-item group relative overflow-hidden rounded-2xl active-scale cursor-pointer">
+<img class="w-full object-cover" data-alt="A cinematic portrait of a woman standing in a sun-drenched European cafe during golden hour. Soft amber light illuminates her face, highlighting natural textures. The background shows blurred vintage coffee machines and mahogany furniture, following a high-end editorial photography style with rich, warm tones." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAwm5G52j-TQo_yvdbfzfse3vSuDNYYlmt64uUB_TLRP_SCwdqdZqBnPc1ApwLcUQH-v3I4QCiDqQVCasBDjMTJA57e0BHuEici98ijHumq0x5smjIO5US9GWD1EcPLE2xu6tBHpoGDGRHZw-LL9fmO3FKnoc7eB8dEFm7736Z8VREPasNE4A7c2PYad3n275cXe16QdNuSq5WFkGjvLGvHoHlo11GbCDs6c4N0V0QxS_phHXY6BXCUKdUeNk-vFtXY-5EcfUYa3Gly"/>
+<div class="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+</div>
+<!-- Item 2 (Locked) -->
+<div class="masonry-item group relative overflow-hidden rounded-2xl active-scale cursor-pointer">
+<img class="w-full object-cover" data-alt="A low-angle urban streetwear shot of a man walking across a minimalist concrete bridge in Tokyo. The lighting is overcast and moody with cool blue and grey tones. The composition is geometric and sharp, emphasizing architectural lines and a professional street-style aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDVl7f-PfPrVWIXfrZkcP7Zcu7LS5xdCOf5OLYWFXl5zSkcmPWBUt_lW7IxrJBZ3tmSHdR9c5QCUZ7RsUyetMMU8ugp-zAZ9eVXrqlxKfDtIKW7oEouQ9Lkn57tIIARzCC7pyqFXDLA4wJGAnaUxRuKGwaX8z9HAfRMBknO0y911-RIPdbJR7BIPA6H8snJuWZIojElskxKvYSKZAw9uQmLFPUTEXyiE2b0aGOX36RbAdSd3c8jrl3bsTqmfMAcxiefyMalbtdjkTY9"/>
+<div class="absolute top-3 right-3 w-8 h-8 rounded-full glass-card flex items-center justify-center shadow-sm">
+<span class="material-symbols-outlined text-premium-gold text-sm" style="font-variation-settings: 'FILL' 1;">lock</span>
+</div>
+</div>
+<!-- Item 3 -->
+<div class="masonry-item group relative overflow-hidden rounded-2xl active-scale cursor-pointer">
+<img class="w-full object-cover" data-alt="A serene beach lifestyle photograph of a couple holding hands while walking into a turquoise ocean at dusk. The sky is painted in soft pastel pinks and purples. The focus is sharp on the rippling water around their feet, capturing a dreamy, high-end travel magazine aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCyn7dxDRbDphhAC4wvs3oxX29vOXz79bidrLYQj7V_HmWingiD7hUz9GrEe7mucaFscE20er5vm8ubs6PnsS1ZDLTEmARhzYSb6FxKE4kmcf7W6PCe-l9UaerDdGlm9cjRhUK9R_OsOSMZczxLXWnNh69VtMYSYtGl0KoEq_ACB4Xtxlc-PcDg5SHJAKFKuhpVQCTLvEKJDGq0vDdqIq_-yOfl6MYRXVDZP-kaGYA701A33RB4UTfCKf560EAkWxJgOjB-pQPVyFAA"/>
+</div>
+<!-- Item 4 -->
+<div class="masonry-item group relative overflow-hidden rounded-2xl active-scale cursor-pointer">
+<img class="w-full object-cover" data-alt="An artistic high-contrast black and white photograph of a model leaning against a brutalist concrete wall. Sharp shadows create dramatic diagonal lines across the frame. The image has a grainy, film-noir quality with deep blacks and bright white highlights, evoking professional fashion photography." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDqohWgvg602cHcJZCjWc-Xgy0u7MsSTRKW-e0cAhdDsPvN4gc0PxEBWe_VF_lliqDRt0R2zHzeOmxZM02df07TNDd5S2vm_iyCQBYi5XmxMXZCO6LSprAf__k7MuGJ6M96GYRJTt0R6bTAov3O4DgUbQR1M9HpzzYwYUQg6v97CjYSLBJU6wY-A9xjKCVtalJZRoO36t2F1qaO1Pkfvw-A5KABsUgWwEj1tJ8vHi_bf2Mfo7P2s8EKAylHSfzbyM0x-EesvtTgMizF"/>
+</div>
+<!-- Item 5 (Locked) -->
+<div class="masonry-item group relative overflow-hidden rounded-2xl active-scale cursor-pointer">
+<img class="w-full object-cover" data-alt="A warm, intimate indoor shot of a woman reading a book by a large window during a rainy afternoon. Soft natural light spills across the pages and her knit sweater. The mood is cozy and quiet, with a shallow depth of field focusing on the texture of the fabric and paper." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDNsEVV4bHsGrKxlcRbZSHiVr43JUPC8p1V3JKmIPzVZorBK_xOWWj7sgXqdTLEX98-oZGUO1UaWvJbg95Rgk9nw5cBeYrUkUvFJSfX5QEBVgEb1gXDjPybEM84nt50PTvT4zdhMDJ7n4Bnzi1m7V_71XMi6xciVof7XRhkpOivIBdMZIqAGxkP5N8tazgk8KdT6BZDM4rFs_B-h3uiuIeKGVgVWmaipTPg8N5J-pTfFFGkipHcJZ1FPia-TSyPP0LVB3Batsmi9AGu"/>
+<div class="absolute top-3 right-3 w-8 h-8 rounded-full glass-card flex items-center justify-center shadow-sm">
+<span class="material-symbols-outlined text-premium-gold text-sm" style="font-variation-settings: 'FILL' 1;">lock</span>
+</div>
+</div>
+<!-- Item 6 -->
+<div class="masonry-item group relative overflow-hidden rounded-2xl active-scale cursor-pointer">
+<img class="w-full object-cover" data-alt="A vibrant night photography shot of a bustling neon-lit street in Seoul. Intense pink and cyan lights reflect on wet pavement. The image uses a wide-angle lens to capture the scale and energy of the city, with sharp details in the signage and light trails from passing cars." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCFyHcg63wG3rG_blEoKEJxcGySbdxYDwuD3OXtnaAsSjImoffIs5511tXV7xKNGhcp0YZtR1MBAQ5oRNPRXVifH0aY265RoEoVPYNT7j-KgcIzhkHRm9mzbYZ9qaoEJlH0jUpSxiKbYCtE6MboZfZvC_xDSrN0gP1xB-__kOK76Eqy20E4KrydtbMHrcZaWW0IAJJ0guWKInlLE1Cp564hTRyIYw8IbDhdjhJ4nttWxABYspDgRyfAjTZx_zKyBX7zwAfTpKqz7cAl"/>
+</div>
+<!-- Item 7 -->
+<div class="masonry-item group relative overflow-hidden rounded-2xl active-scale cursor-pointer">
+<img class="w-full object-cover" data-alt="A minimalist architectural shot of a spiral staircase in a modern art museum. Pristine white surfaces and dramatic curving shadows define the composition. The aesthetic is clean, sophisticated, and symmetrical, reflecting a high-end designer's eye for geometry and light." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAIuDiIcrBfXbESULeJgk5GsVHOGa8KQ4HVEgTGQetxQoFXTQHGS2a4AWDXvkHraeX3B_3B-Y85F7kthTW_sArjQsCCzXdgfUN5WWXXrJ6cI-r62dfU6pwYfmwF2dvPU2d5js3Nl37eueYQ7cXTelG23LC_tfn_ier-gqfWDXoZsC5y5thvhzTDnoLVfBDR5Db6Q481cgER6leFG3rhEwhLwMDA8XTAwpdypbKBRM8T40jGOQGIwL8sM1n5RHKl5LJNqB9s_bGdWPTb"/>
+</div>
+<!-- Item 8 (Locked) -->
+<div class="masonry-item group relative overflow-hidden rounded-2xl active-scale cursor-pointer">
+<img class="w-full object-cover" data-alt="A high-fashion editorial close-up of a model's face under dappled forest light. Tiny leaves cast intricate shadows across the skin. The color palette is earthy and organic, with mossy greens and soft browns, captured with a professional macro lens for extreme detail." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDetGJCX4WiQYjZo1K6c_OeVkNDtBXyHpu-eeoz9EsILjknPCuIRhV4zybuHt3yAuQXCS-4qd4R6RF-qyDQy1HL6jNnyNkWNUoqIZjFiarPpvvND40UtyO8lhAgAlPySsVuuCo_OSJCUZuvzR5Uzo8ZAsH0blPzgY-YKQs98pIdL2ijReApnOfRoWByiMSgbc4aAwtdUN8fX62lVzcxK81TEP1pDpHyEn8gRKlO3v6KEMLKq4O9iDLz1F1uGNzvZCnHnk6JVEhKKoPh"/>
+<div class="absolute top-3 right-3 w-8 h-8 rounded-full glass-card flex items-center justify-center shadow-sm">
+<span class="material-symbols-outlined text-premium-gold text-sm" style="font-variation-settings: 'FILL' 1;">lock</span>
+</div>
+</div>
+<!-- Repeat Items to simulate 30+ -->
+<div class="masonry-item group relative overflow-hidden rounded-2xl active-scale cursor-pointer">
+<img class="w-full object-cover" data-alt="A cinematic capture of a cyclist riding through a misty mountain pass at dawn. The light is soft and ethereal, breaking through pine trees in distinct god-rays. The mood is adventurous and epic, using a desaturated cool-tone color grade common in high-end outdoors photography." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAPIVyeiNNyUFtm2OHMclfYtnhvphLVjKmEmqd6CiCMz0EbXXe_MIN5lWcchkTzsvHl88gwwLy9K1Mu_Tzy7A1TNNAcWs3mmJxrYIhSBwOjH9uM6uSpF1svdPndmFK-SbSmTxANqsXsL0EWMxz0BMKQSqa6UBeIpH13Vh6iY_iobzVo4QWDL6fI3FoNCE7nyjRrN9-iBs56LqWh6LKUWTQH7WXojUj2jyNDc3P59CWSCUA8LuIql9wLOj1gbrghW75IuAXIMF5Hbr-c"/>
+</div>
+<div class="masonry-item group relative overflow-hidden rounded-2xl active-scale cursor-pointer">
+<img class="w-full object-cover" data-alt="A lifestyle photo of a modern outdoor dinner party under hanging Edison bulbs. The focus is on a beautifully set table with wine glasses and artisanal food, captured with a warm, inviting glow and a shallow depth of field that blurs the guests in the background." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAZpvfbNhohul3zVRdF7TWekHxz9K2Ry3HS9Rk8jibnd7ugFojfiCnIS7KaFakvDw7afItE3XlbafX5MPZYK7E6uy_TQX1QpszAIZkRlKbXE1i1MWcTog2pYUyqNtRm5nDMAPyhw460A_MlHV2Yf0Ee4oJoyftoxRsPnBhNNDMzu_RJ-kAOsXj-fLbibWj6jUD934TSnVn2oZEvg5N8rrMScHt_vOACn61rixly7SXkLb90wDQ7sf8g2guqTz-xo5_Wy7FgkV1oMc_J"/>
+</div>
+<div class="masonry-item group relative overflow-hidden rounded-2xl active-scale cursor-pointer">
+<img class="w-full object-cover" data-alt="A dynamic action shot of a skater performing a trick at a concrete park during sunset. The low sun creates long, dramatic shadows and a brilliant orange lens flare. The composition is low-profile and energetic, capturing the movement with a high shutter speed." src="https://lh3.googleusercontent.com/aida-public/AB6AXuD2SVrMt9O7QfFXHkjrHt0lnHrKgV_R4y8qJZqtLoOLY3FJz5Y25E44soRXBOx1--t4Aw0S-jJ6AOFovIQdcqMjSfzdmdBzJE34OoONIokgQxvxiriWM7pCJktE6M2F4Ix3_y994EJgU8iRHDfLqmta6vF-SuqNUh40EjHJKoxUjM20t2isurVK0ZkmNQsYiGfOOHlhtrGlxnIf1R6LJIxr_wNF-7So383ChiXKgKg1i5OZQcItfCuOnbsJEdrvH5j_6B9VlYK2UYAg"/>
+</div>
+<div class="masonry-item group relative overflow-hidden rounded-2xl active-scale cursor-pointer">
+<img class="w-full object-cover" data-alt="An elegant interior design photograph of a minimalist living room featuring a velvet indigo sofa and a marble coffee table. Large windows reveal a city skyline. The lighting is clean and balanced, emphasizing premium textures and a sophisticated, modern lifestyle aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCA2SubSBF-T7-oIT_U3cBgy9EeY_U3dK3hOIiH1YNB0R6mgCmLHyD5k1e3uInfDXieUmPJxHpdCorbNoeabL0No3x1ns0E6BtLgLWQUzU0ljUBj5WbwniHzeoV3OSmFgsnm61oRA4xl47-OS-d77Zsxz2TpqL5p59HFZTHbzz4NB76PIHPQZN0b_pQQWSHp37kpNZK-IlRzY92M8MgP9jE0_4cIhL7yjyDK-qjDvogAqP08ILVQBNcbqjxDiyHkvNRHSqSambwyv73"/>
+</div>
+<!-- ...More placeholders would go here... -->
+</div>
+</div>
+</main>
+<!-- Bottom Actions & Navigation -->
+<div class="fixed bottom-0 w-full z-50">
+<!-- Floating Primary Action -->
+<div class="px-margin-main pb-4">
+<button class="w-full h-14 bg-action-indigo text-white rounded-2xl font-bold flex items-center justify-center gap-3 shadow-xl active:scale-[0.98] transition-transform">
+<span class="material-symbols-outlined">add_photo_alternate</span>
+                Import from Camera Roll
+            </button>
+</div>
+<!-- Bottom Navigation Bar -->
+<nav class="bg-camera-black/40 dark:bg-camera-black/60 backdrop-blur-3xl rounded-t-xl h-20 shadow-sm flex justify-around items-center px-8 pb-safe-area-bottom pt-4">
+<button class="flex flex-col items-center justify-center text-interface-gray p-2 hover:text-primary-fixed-dim active:scale-90 transition-all duration-200">
+<span class="material-symbols-outlined">photo_camera</span>
+</button>
+<button class="flex flex-col items-center justify-center text-action-indigo bg-white/10 rounded-full p-2 active:scale-90 transition-all duration-200">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">style</span>
+</button>
+<button class="flex flex-col items-center justify-center text-interface-gray p-2 hover:text-primary-fixed-dim active:scale-90 transition-all duration-200">
+<span class="material-symbols-outlined">photo_library</span>
+</button>
+<button class="flex flex-col items-center justify-center text-interface-gray p-2 hover:text-primary-fixed-dim active:scale-90 transition-all duration-200">
+<span class="material-symbols-outlined">auto_fix_high</span>
+</button>
+</nav>
+</div>
+<!-- Micro-interactions Script -->
+<script>
+        // Handle filter button selection
+        const filterButtons = document.querySelectorAll('.px-5.py-2.rounded-full');
+        filterButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                filterButtons.forEach(b => {
+                    b.classList.remove('bg-action-indigo', 'text-white');
+                    b.classList.add('bg-surface-container', 'text-on-surface-variant');
+                });
+                btn.classList.add('bg-action-indigo', 'text-white');
+                btn.classList.remove('bg-surface-container', 'text-on-surface-variant');
+            });
+        });
+
+        // Simple haptic-like scale effect on click for grid items
+        const gridItems = document.querySelectorAll('.masonry-item');
+        gridItems.forEach(item => {
+            item.addEventListener('touchstart', () => item.classList.add('scale-95'));
+            item.addEventListener('touchend', () => item.classList.remove('scale-95'));
+        });
+    </script>
+</body></html>

@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/>
+<title>Boyfriend Camera - Live Viewfinder</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind Configuration -->
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "tertiary": "#7e3e00",
+                    "secondary-fixed-dim": "#d2c4b6",
+                    "interface-gray": "#8E8E93",
+                    "on-tertiary-fixed": "#301400",
+                    "primary-fixed": "#e2dfff",
+                    "action-indigo": "#5856D6",
+                    "surface-container": "#eeeef0",
+                    "on-surface": "#1a1c1d",
+                    "surface-container-lowest": "#ffffff",
+                    "error": "#ba1a1a",
+                    "primary": "#3f3bbd",
+                    "on-surface-variant": "#464554",
+                    "outline-variant": "#c7c4d6",
+                    "on-primary-fixed-variant": "#3631b4",
+                    "on-error-container": "#93000a",
+                    "surface": "#f9f9fb",
+                    "on-primary-container": "#e7e4ff",
+                    "on-secondary-fixed": "#221a12",
+                    "on-tertiary-container": "#ffe1cf",
+                    "primary-container": "#5856d6",
+                    "on-tertiary-fixed-variant": "#713700",
+                    "tertiary-fixed-dim": "#ffb785",
+                    "tertiary-fixed": "#ffdcc6",
+                    "on-secondary-fixed-variant": "#4f453b",
+                    "surface-container-high": "#e8e8ea",
+                    "secondary-container": "#efe0d1",
+                    "error-container": "#ffdad6",
+                    "surface-tint": "#4f4ccd",
+                    "surface-container-highest": "#e2e2e4",
+                    "outline": "#777585",
+                    "premium-gold": "#D4AF37",
+                    "surface-bright": "#f9f9fb",
+                    "on-error": "#ffffff",
+                    "surface-variant": "#e2e2e4",
+                    "inverse-surface": "#2f3132",
+                    "on-tertiary": "#ffffff",
+                    "secondary-fixed": "#efe0d1",
+                    "camera-black": "#000000",
+                    "on-primary-fixed": "#0c006a",
+                    "surface-dim": "#d9dadc",
+                    "tertiary-container": "#a25100",
+                    "surface-container-low": "#f3f3f5",
+                    "on-primary": "#ffffff",
+                    "inverse-on-surface": "#f0f0f2",
+                    "background": "#f9f9fb",
+                    "on-background": "#1a1c1d",
+                    "on-secondary-container": "#6d6357",
+                    "primary-fixed-dim": "#c2c1ff",
+                    "inverse-primary": "#c2c1ff",
+                    "secondary": "#675d51",
+                    "on-secondary": "#ffffff"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "margin-main": "20px",
+                    "control-gap": "8px",
+                    "safe-area-bottom": "34px",
+                    "gutter": "12px"
+            },
+            "fontFamily": {
+                    "label-caps": ["Inter"],
+                    "headline-lg-mobile": ["Inter"],
+                    "display-xl": ["Inter"],
+                    "headline-lg": ["Inter"],
+                    "mono-value": ["courierPrime"],
+                    "body-md": ["Inter"]
+            },
+            "fontSize": {
+                    "label-caps": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}],
+                    "headline-lg-mobile": ["24px", {"lineHeight": "30px", "fontWeight": "600"}],
+                    "display-xl": ["40px", {"lineHeight": "48px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                    "headline-lg": ["28px", {"lineHeight": "34px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                    "mono-value": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                    "body-md": ["17px", {"lineHeight": "24px", "fontWeight": "400"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        body {
+            background-color: #000;
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .viewfinder-grid {
+            background-image: 
+                linear-gradient(to right, rgba(255,255,255,0.15) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255,255,255,0.15) 1px, transparent 1px);
+            background-size: 33.33% 33.33%;
+        }
+
+        .level-indicator-active {
+            filter: drop-shadow(0 0 8px #5856D6);
+        }
+
+        .shutter-glow {
+            box-shadow: 0 0 20px rgba(88, 86, 214, 0.4);
+        }
+
+        .glass-morphic {
+            backdrop-filter: blur(20px);
+            background: rgba(0, 0, 0, 0.4);
+            border: 0.5px solid rgba(255, 255, 255, 0.1);
+        }
+
+        @keyframes pulse-focus {
+            0% { transform: scale(1); opacity: 0.8; }
+            50% { transform: scale(1.05); opacity: 1; }
+            100% { transform: scale(1); opacity: 0.8; }
+        }
+
+        .focus-square {
+            border: 1px solid #5856D6;
+            animation: pulse-focus 2s infinite ease-in-out;
+        }
+
+        .haptic-scale:active {
+            transform: scale(0.92);
+            transition: transform 0.1s ease-out;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="flex flex-col h-screen font-body-md text-on-surface">
+<!-- Main Viewfinder Container -->
+<main class="relative flex-1 w-full bg-camera-black overflow-hidden">
+<!-- Live Camera Feed Placeholder -->
+<div class="absolute inset-0 z-0">
+<div class="w-full h-full bg-cover bg-center" data-alt="A cinematic, high-resolution portrait shot through a professional camera lens. A fashionable woman stands in a sun-drenched minimalist urban courtyard with clean concrete walls and soft greenery. The lighting is bright and airy with high contrast, reflecting a premium light-mode aesthetic. Depth of field is shallow, creating a soft bokeh effect on the architectural background." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBwdrMSEgKt_L6IuuuqpxKJEzgRpuot5mFtqwDTEEYGZyA6mOWH7n0DUC63MEtIQdtsF5JWw3i1KPDK19Xv60tft9xH7N0V1NsyKdz4kJzt0bM2o_s0yUIpZ7U0kb-3dRctZIWqWq3I6qLwHUokTxXYAAdNSUlEol8tZ001ZxwE_Px42gSmdOm9JD70bwaGFbvqfvjGicYKRo3L8MhCFBOS27tpJWpcHPxKb5yT8Kvr-hTw3lRH98VFxHXvpzJ-RZf_pt_udgSfpJm-')">
+</div>
+</div>
+<!-- 3x3 Grid Overlay -->
+<div class="viewfinder-grid absolute inset-0 z-10 pointer-events-none"></div>
+<!-- Top App Bar (Shared Component Strategy) -->
+<header class="fixed top-0 w-full z-50 flex justify-between items-center px-margin-main h-14 bg-transparent backdrop-blur-md">
+<button class="haptic-scale w-10 h-10 flex items-center justify-center rounded-full bg-camera-black/20 text-white transition-all">
+<span class="material-symbols-outlined text-[20px]">arrow_back_ios_new</span>
+</button>
+<div class="flex flex-col items-center">
+<h1 class="font-headline-lg-mobile text-headline-lg-mobile font-bold text-white tracking-tight">Boyfriend Camera</h1>
+<div class="flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-error"></span>
+<span class="font-label-caps text-label-caps text-white uppercase tracking-widest opacity-80">Live</span>
+</div>
+</div>
+<button class="haptic-scale w-10 h-10 flex items-center justify-center rounded-full bg-camera-black/20 text-white transition-all">
+<span class="material-symbols-outlined text-[24px]">settings</span>
+</button>
+</header>
+<!-- Live Nudge UI -->
+<div class="absolute top-24 left-1/2 -translate-x-1/2 z-30 w-full px-margin-main flex justify-center pointer-events-none">
+<div class="glass-morphic px-6 py-3 rounded-full flex items-center gap-3 animate-bounce">
+<span class="material-symbols-outlined text-action-indigo">straighten</span>
+<p class="font-label-caps text-label-caps text-white">MOVE CLOSER FOR OPTIMAL DEPTH</p>
+<span class="material-symbols-outlined text-action-indigo" style="font-variation-settings: 'FILL' 1;">arrow_forward</span>
+</div>
+</div>
+<!-- Level Indicator (Center Overlay) -->
+<div class="absolute inset-0 flex items-center justify-center z-20 pointer-events-none" id="level-container">
+<div class="relative w-48 h-[1px] flex items-center justify-center">
+<!-- Center point -->
+<div class="w-1.5 h-1.5 rounded-full bg-white shadow-sm"></div>
+<!-- Left wing -->
+<div class="absolute left-0 w-20 h-[2px] bg-white transition-all duration-75 rotate-0 origin-right" id="level-left"></div>
+<!-- Right wing -->
+<div class="absolute right-0 w-20 h-[2px] bg-white transition-all duration-75 rotate-0 origin-left" id="level-right"></div>
+</div>
+</div>
+<!-- Focus Square -->
+<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-24 h-24 focus-square z-15 rounded-[2px] opacity-60"></div>
+<!-- Bottom Controls Interface -->
+<div class="absolute bottom-0 w-full z-40">
+<!-- Dial Control (Mode Switcher Style) -->
+<div class="flex justify-center mb-6 px-margin-main">
+<div class="flex gap-6 items-center overflow-x-auto no-scrollbar">
+<span class="font-label-caps text-label-caps text-white/40 cursor-pointer">PORTRAIT</span>
+<div class="px-4 py-1.5 rounded-full bg-action-indigo/20 border border-action-indigo/40">
+<span class="font-label-caps text-label-caps text-action-indigo">SMART COMP</span>
+</div>
+<span class="font-label-caps text-label-caps text-white/40 cursor-pointer">CINEMATIC</span>
+<span class="font-label-caps text-label-caps text-white/40 cursor-pointer">NIGHT</span>
+</div>
+</div>
+<!-- Main Control Bar -->
+<div class="glass-morphic rounded-t-[32px] px-margin-main pt-8 pb-safe-area-bottom">
+<div class="flex justify-between items-center max-w-md mx-auto relative">
+<!-- Reference Thumbnail -->
+<div class="group relative">
+<div class="w-14 h-14 rounded-xl overflow-hidden border-2 border-white/20 haptic-scale cursor-pointer">
+<div class="w-full h-full bg-cover bg-center" data-alt="A professional fashion photography reference image showing a model in a power suit against a brutalist architectural backdrop. High-contrast lighting and a dramatic low-angle perspective define the aesthetic. The palette is dominated by slate grays and muted neutrals, serving as a visual guide for professional posing." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBXAcP-fzFYJsEcYtAXla71Fhln4tyZVhm0pJbUtaOG7Gc-liKbqcz2X_ARtHPcbRclfjHLGFXhN8jizXZjgRowH2GrsQfCNhEmkPHxGoinwrU56dH9cCMlboUxBm8cgnaV64lA2CsOo_htPZ71GiE_0rQtP1cGfV_TuQZyFxKlVxx_di9Aw6SxYLG6F1Tcb5XLIIw1FDcm5CmAM4TQb76IUOOZOjS-AOv3-6VVeWWqBDk9icWInpj26qkpWkp6SiHg_68nvpt5hTwW')">
+</div>
+</div>
+<span class="absolute -top-2 -right-2 bg-action-indigo text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold">POSE</span>
+</div>
+<!-- Shutter Button Container -->
+<div class="relative flex items-center justify-center">
+<!-- Shutter Outer Ring -->
+<div class="w-20 h-20 rounded-full border-[3px] border-white flex items-center justify-center p-1 cursor-pointer shutter-glow haptic-scale transition-all" id="shutter-btn">
+<div class="w-full h-full rounded-full bg-white"></div>
+</div>
+</div>
+<!-- Action Toggle -->
+<button class="haptic-scale flex flex-col items-center gap-1 text-white opacity-80 hover:opacity-100 transition-opacity">
+<div class="w-12 h-12 rounded-full border border-white/20 flex items-center justify-center">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">auto_fix_high</span>
+</div>
+<span class="font-label-caps text-[10px] tracking-widest">POSE AI</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Floating Exposure/Focus Sliders (Tactical Overlays) -->
+<div class="absolute right-margin-main top-1/2 -translate-y-1/2 flex flex-col gap-8 z-30">
+<div class="flex flex-col items-center gap-2">
+<span class="material-symbols-outlined text-white text-[20px]">light_mode</span>
+<div class="w-[2px] h-32 bg-white/20 rounded-full relative overflow-hidden">
+<div class="absolute bottom-0 w-full h-1/2 bg-action-indigo"></div>
+</div>
+<span class="font-mono-value text-mono-value text-white text-[10px]">+0.7</span>
+</div>
+</div>
+</main>
+<!-- Bottom Navigation (Shared Component Logic) -->
+<nav class="fixed bottom-0 w-full flex justify-around items-center px-8 pb-safe-area-bottom pt-4 bg-camera-black/40 backdrop-blur-3xl z-50 rounded-t-xl shadow-sm">
+<div class="flex flex-col items-center justify-center text-action-indigo bg-white/10 rounded-full p-2 haptic-scale">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">photo_camera</span>
+</div>
+<div class="flex flex-col items-center justify-center text-interface-gray p-2 haptic-scale hover:text-primary-fixed-dim">
+<span class="material-symbols-outlined">style</span>
+</div>
+<div class="flex flex-col items-center justify-center text-interface-gray p-2 haptic-scale hover:text-primary-fixed-dim">
+<span class="material-symbols-outlined">photo_library</span>
+</div>
+<div class="flex flex-col items-center justify-center text-interface-gray p-2 haptic-scale hover:text-primary-fixed-dim">
+<span class="material-symbols-outlined">auto_fix_high</span>
+</div>
+</nav>
+<script>
+        // Micro-interactions and Level Indicator Logic
+        const levelLeft = document.getElementById('level-left');
+        const levelRight = document.getElementById('level-right');
+        const shutterBtn = document.getElementById('shutter-btn');
+        
+        let targetRotation = 0;
+        let currentRotation = 0;
+
+        // Simulate level movement
+        function updateLevel() {
+            // Add a bit of natural jitter and slow oscillation
+            targetRotation = Math.sin(Date.now() / 1500) * 2;
+            
+            // Smoothly interpolate current rotation to target
+            currentRotation += (targetRotation - currentRotation) * 0.1;
+            
+            levelLeft.style.transform = `rotate(${currentRotation}deg)`;
+            levelRight.style.transform = `rotate(${-currentRotation}deg)`;
+
+            // Haptic Feedback Visualization: If leveled (close to 0), turn green/indigo
+            if (Math.abs(currentRotation) < 0.2) {
+                levelLeft.classList.add('bg-action-indigo', 'level-indicator-active');
+                levelRight.classList.add('bg-action-indigo', 'level-indicator-active');
+                levelLeft.classList.remove('bg-white');
+                levelRight.classList.remove('bg-white');
+            } else {
+                levelLeft.classList.remove('bg-action-indigo', 'level-indicator-active');
+                levelRight.classList.remove('bg-action-indigo', 'level-indicator-active');
+                levelLeft.classList.add('bg-white');
+                levelRight.classList.add('bg-white');
+            }
+
+            requestAnimationFrame(updateLevel);
+        }
+
+        updateLevel();
+
+        // Shutter Button Interaction
+        shutterBtn.addEventListener('click', () => {
+            // Flash effect
+            const flash = document.createElement('div');
+            flash.className = 'fixed inset-0 bg-white z-[100] pointer-events-none transition-opacity duration-300 opacity-100';
+            document.body.appendChild(flash);
+            
+            setTimeout(() => {
+                flash.style.opacity = '0';
+                setTimeout(() => flash.remove(), 300);
+            }, 50);
+
+            // Shutter sound / haptic visual feedback
+            shutterBtn.classList.add('scale-90');
+            setTimeout(() => shutterBtn.classList.remove('scale-90'), 150);
+        });
+
+        // Add haptic-feedback CSS class support through active states defined in Tailwind config
+        document.querySelectorAll('.haptic-scale').forEach(el => {
+            el.addEventListener('touchstart', () => {
+                el.style.transform = 'scale(0.92)';
+            });
+            el.addEventListener('touchend', () => {
+                el.style.transform = 'scale(1)';
+            });
+        });
+    </script>
+</body></html>

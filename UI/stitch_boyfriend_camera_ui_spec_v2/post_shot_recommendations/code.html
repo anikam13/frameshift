@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport"/>
+<title>Post-Shot | Boyfriend Camera</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Courier+Prime&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-primary": "#1c0b9f",
+                    "on-secondary-container": "#003a11",
+                    "error-container": "#93000a",
+                    "secondary-fixed-dim": "#53e16f",
+                    "on-primary-fixed": "#0c006a",
+                    "on-tertiary-fixed": "#301400",
+                    "inverse-surface": "#e5e2e1",
+                    "inverse-on-surface": "#313030",
+                    "surface-tint": "#c2c1ff",
+                    "surface-container-high": "#2a2a2a",
+                    "surface-dim": "#131313",
+                    "tertiary": "#ffb785",
+                    "secondary": "#53e16f",
+                    "surface": "#131313",
+                    "outline-variant": "#464554",
+                    "primary-container": "#5856d6",
+                    "on-secondary-fixed-variant": "#00531c",
+                    "surface-container-highest": "#353534",
+                    "primary-fixed": "#e2dfff",
+                    "on-surface-variant": "#c7c4d6",
+                    "tertiary-fixed": "#ffdcc6",
+                    "tertiary-fixed-dim": "#ffb785",
+                    "secondary-container": "#05b046",
+                    "on-primary-fixed-variant": "#3631b4",
+                    "inverse-primary": "#4f4ccd",
+                    "on-error-container": "#ffdad6",
+                    "primary": "#c2c1ff",
+                    "on-tertiary": "#502500",
+                    "secondary-fixed": "#72fe88",
+                    "on-secondary": "#003911",
+                    "surface-container-low": "#1c1b1b",
+                    "on-secondary-fixed": "#002107",
+                    "surface-bright": "#393939",
+                    "surface-container-lowest": "#0e0e0e",
+                    "on-tertiary-fixed-variant": "#713700",
+                    "on-primary-container": "#e7e4ff",
+                    "on-background": "#e5e2e1",
+                    "outline": "#918f9f",
+                    "surface-container": "#201f1f",
+                    "background": "#131313",
+                    "tertiary-container": "#a25100",
+                    "on-tertiary-container": "#ffe1cf",
+                    "primary-fixed-dim": "#c2c1ff",
+                    "error": "#ffb4ab",
+                    "surface-variant": "#353534",
+                    "on-surface": "#e5e2e1",
+                    "on-error": "#690005",
+                    "grid-line": "rgba(145, 143, 159, 0.3)",
+                    "surface-1": "#141414",
+                    "surface-2": "#1C1C1E"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.125rem",
+                    "lg": "0.25rem",
+                    "xl": "0.5rem",
+                    "full": "0.75rem"
+            },
+            "spacing": {
+                    "card-padding": "16px",
+                    "component-gap": "8px",
+                    "margin-side": "20px",
+                    "safe-area-bottom": "34px",
+                    "hairline": "0.5px"
+            },
+            "fontFamily": {
+                    "wordmark": ["Inter"],
+                    "body": ["Inter"],
+                    "value-mono": ["Courier Prime"],
+                    "label-caps": ["Inter"],
+                    "micro": ["Inter"],
+                    "cta": ["Inter"],
+                    "screen-title": ["Inter"]
+            },
+            "fontSize": {
+                    "wordmark": ["15px", {"lineHeight": "20px", "fontWeight": "500"}],
+                    "body": ["15px", {"lineHeight": "20px", "fontWeight": "400"}],
+                    "value-mono": ["14px", {"lineHeight": "18px", "fontWeight": "400"}],
+                    "label-caps": ["12px", {"lineHeight": "16px", "letterSpacing": "0.06em", "fontWeight": "600"}],
+                    "micro": ["11px", {"lineHeight": "14px", "fontWeight": "500"}],
+                    "cta": ["16px", {"lineHeight": "20px", "fontWeight": "600"}],
+                    "screen-title": ["17px", {"lineHeight": "22px", "fontWeight": "600"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        body {
+            background-color: #000000;
+            color: #e5e2e1;
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 200, 'GRAD' 0, 'opsz' 24;
+        }
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        .hairline-border {
+            border: 0.5px solid rgba(145, 143, 159, 0.3);
+        }
+        .drawer-blur {
+            backdrop-filter: blur(24px);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="flex flex-col">
+<!-- Top Navigation Bar -->
+<nav class="fixed top-0 w-full z-50 flex justify-between items-center px-margin-side h-14 bg-background">
+<button class="font-cta text-cta text-secondary hover:opacity-80 transition-opacity active:scale-95 transition-transform">
+            Retake
+        </button>
+<span class="font-wordmark text-wordmark text-on-surface tracking-widest opacity-50">001/024</span>
+<button class="font-cta text-cta text-secondary hover:opacity-80 transition-opacity active:scale-95 transition-transform">
+            Keep
+        </button>
+</nav>
+<!-- Main Content Area: Captured Photo -->
+<main class="flex-grow relative flex items-center justify-center pt-14 pb-[140px] bg-black">
+<div class="w-full h-full relative overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="A high-end professional fashion portrait of a woman standing in a minimalist concrete architectural space. She is wearing a structured black blazer with sharp shoulders. The lighting is dramatic and technical, mimicking a high-end photography studio with deep blacks and soft highlight gradients. The mood is sophisticated, technical, and modern, fitting a high-end camera interface aesthetic with extreme detail and cinematic depth." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBtGtvzl148EKRsp7zgmYabUhQUzECXusrCKOvEqPbBM3Cw1biM5A3Mlc5soQ4iwt26ffAOUJf3zzMzZiMrQuXZ5H9HrYE2WcZwhqyjikW1nsbHcboU8Bi_NqHWSPl2yVBm5Kp4PjaNAl7mCfOg_ROBiG1j1IMW6Mxxjyn_paQpZO5q4jJguspVgHLpMBifhtBQKsv3PZTaYe4f9v6ys06-VPpSWi0rL5qm4VKyr-rxTsKTuLdcOi4p9kIuT8Omj1h0aT6-hgofSK0"/>
+<!-- Metadata Overlay (Technical Instrument Feel) -->
+<div class="absolute bottom-4 left-margin-side font-value-mono text-micro text-white/60 space-y-1">
+<div>ISO 100 • 50mm • f/1.8</div>
+<div>1/250s • RAW • 45.4MP</div>
+</div>
+<!-- Level Indicator (Visual Token) -->
+<div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+<div class="w-16 h-hairline bg-secondary opacity-80"></div>
+</div>
+</div>
+</main>
+<!-- Recommendation Strip (Bottom Drawer) -->
+<aside class="fixed bottom-0 left-0 right-0 h-[174px] bg-surface-1 rounded-t-[20px] shadow-2xl z-40 flex flex-col items-center">
+<!-- Handle Bar -->
+<div class="w-10 h-1 bg-white/20 rounded-full mt-2 mb-4"></div>
+<!-- Scrolling Recommendation Cards -->
+<div class="flex overflow-x-auto w-full px-margin-side space-x-3 no-scrollbar pb-6">
+<!-- Card 1: Lighting -->
+<div class="flex-shrink-0 w-[140px] h-[96px] bg-surface-2 rounded-xl p-3 flex flex-col justify-between hairline-border hover:bg-surface-bright/10 transition-colors">
+<div class="flex items-center justify-between">
+<span class="material-symbols-outlined text-secondary text-[20px]">light_mode</span>
+<span class="font-label-caps text-micro uppercase opacity-40">AI</span>
+</div>
+<div>
+<h4 class="font-label-caps text-micro text-secondary mb-0.5">Lighting</h4>
+<p class="font-micro text-[10px] leading-tight text-on-surface-variant line-clamp-2">Subject was backlit. Try side lighting next time.</p>
+</div>
+</div>
+<!-- Card 2: Pose -->
+<div class="flex-shrink-0 w-[140px] h-[96px] bg-surface-2 rounded-xl p-3 flex flex-col justify-between hairline-border hover:bg-surface-bright/10 transition-colors">
+<div class="flex items-center justify-between">
+<span class="material-symbols-outlined text-secondary text-[20px]">accessibility_new</span>
+<span class="font-label-caps text-micro uppercase opacity-40">Pose</span>
+</div>
+<div>
+<h4 class="font-label-caps text-micro text-secondary mb-0.5">Pose</h4>
+<p class="font-micro text-[10px] leading-tight text-on-surface-variant line-clamp-2">Try this pose: lean against the wall.</p>
+</div>
+</div>
+<!-- Card 3: Framing -->
+<div class="flex-shrink-0 w-[140px] h-[96px] bg-surface-2 rounded-xl p-3 flex flex-col justify-between hairline-border hover:bg-surface-bright/10 transition-colors">
+<div class="flex items-center justify-between">
+<span class="material-symbols-outlined text-secondary text-[20px]">grid_view</span>
+<span class="font-label-caps text-micro uppercase opacity-40">Comp</span>
+</div>
+<div>
+<h4 class="font-label-caps text-micro text-secondary mb-0.5">Framing</h4>
+<p class="font-micro text-[10px] leading-tight text-on-surface-variant line-clamp-2">Step in closer to fill the frame.</p>
+</div>
+</div>
+<!-- Card 4: Focus -->
+<div class="flex-shrink-0 w-[140px] h-[96px] bg-surface-2 rounded-xl p-3 flex flex-col justify-between hairline-border hover:bg-surface-bright/10 transition-colors">
+<div class="flex items-center justify-between">
+<span class="material-symbols-outlined text-secondary text-[20px]">adjust</span>
+<span class="font-label-caps text-micro uppercase opacity-40">Focus</span>
+</div>
+<div>
+<h4 class="font-label-caps text-micro text-secondary mb-0.5">Focus</h4>
+<p class="font-micro text-[10px] leading-tight text-on-surface-variant line-clamp-2">Eye-tracking locked. Depth of field optimized.</p>
+</div>
+</div>
+</div>
+</aside>
+<!-- Status Bar Safe Area -->
+<div class="fixed bottom-0 h-safe-area-bottom w-full bg-surface-1"></div>
+<script>
+        // Simple micro-interaction for cards
+        document.querySelectorAll('.bg-surface-2').forEach(card => {
+            card.addEventListener('touchstart', () => {
+                card.style.transform = 'scale(0.98)';
+                card.style.transition = 'transform 0.1s ease';
+            });
+            card.addEventListener('touchend', () => {
+                card.style.transform = 'scale(1)';
+            });
+        });
+    </script>
+</body></html>

@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport"/>
+<title>Boyfriend Camera - Library</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=Courier+Prime&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-primary": "#1c0b9f",
+                        "on-secondary-container": "#003a11",
+                        "error-container": "#93000a",
+                        "secondary-fixed-dim": "#53e16f",
+                        "on-primary-fixed": "#0c006a",
+                        "on-tertiary-fixed": "#301400",
+                        "inverse-surface": "#e5e2e1",
+                        "inverse-on-surface": "#313030",
+                        "surface-tint": "#c2c1ff",
+                        "surface-container-high": "#2a2a2a",
+                        "surface-dim": "#131313",
+                        "tertiary": "#ffb785",
+                        "secondary": "#53e16f",
+                        "surface": "#131313",
+                        "outline-variant": "#464554",
+                        "primary-container": "#5856d6",
+                        "on-secondary-fixed-variant": "#00531c",
+                        "surface-container-highest": "#353534",
+                        "primary-fixed": "#e2dfff",
+                        "on-surface-variant": "#c7c4d6",
+                        "tertiary-fixed": "#ffdcc6",
+                        "tertiary-fixed-dim": "#ffb785",
+                        "secondary-container": "#05b046",
+                        "on-primary-fixed-variant": "#3631b4",
+                        "inverse-primary": "#4f4ccd",
+                        "on-error-container": "#ffdad6",
+                        "primary": "#c2c1ff",
+                        "on-tertiary": "#502500",
+                        "secondary-fixed": "#72fe88",
+                        "on-secondary": "#003911",
+                        "surface-container-low": "#1c1b1b",
+                        "on-secondary-fixed": "#002107",
+                        "surface-bright": "#393939",
+                        "surface-container-lowest": "#0e0e0e",
+                        "on-tertiary-fixed-variant": "#713700",
+                        "on-primary-container": "#e7e4ff",
+                        "on-background": "#e5e2e1",
+                        "outline": "#918f9f",
+                        "surface-container": "#201f1f",
+                        "background": "#000000",
+                        "tertiary-container": "#a25100",
+                        "on-tertiary-container": "#ffe1cf",
+                        "primary-fixed-dim": "#c2c1ff",
+                        "error": "#ffb4ab",
+                        "surface-variant": "#353534",
+                        "on-surface": "#e5e2e1",
+                        "on-error": "#690005"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "card-padding": "16px",
+                        "component-gap": "8px",
+                        "margin-side": "20px",
+                        "safe-area-bottom": "34px",
+                        "hairline": "0.5px"
+                    },
+                    "fontFamily": {
+                        "wordmark": ["Inter"],
+                        "body": ["Inter"],
+                        "value-mono": ["Courier Prime"],
+                        "label-caps": ["Inter"],
+                        "micro": ["Inter"],
+                        "cta": ["Inter"],
+                        "screen-title": ["Inter"]
+                    },
+                    "fontSize": {
+                        "wordmark": ["15px", {"lineHeight": "20px", "fontWeight": "700"}],
+                        "body": ["15px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "value-mono": ["14px", {"lineHeight": "18px", "fontWeight": "400"}],
+                        "label-caps": ["12px", {"lineHeight": "16px", "letterSpacing": "0.06em", "fontWeight": "600"}],
+                        "micro": ["11px", {"lineHeight": "14px", "fontWeight": "500"}],
+                        "cta": ["16px", {"lineHeight": "20px", "fontWeight": "600"}],
+                        "screen-title": ["17px", {"lineHeight": "22px", "fontWeight": "600"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            background-color: #000000;
+            color: #e5e2e1;
+            -webkit-font-smoothing: antialiased;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .gutters-3px {
+            gap: 3px;
+        }
+        @keyframes pulse-white {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.9); }
+        }
+        .processing-dot {
+            animation: pulse-white 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="font-body text-body selection:bg-primary/30">
+<!-- Top Navigation Bar -->
+<!-- Authority: JSON "TopAppBar" + Style Guidance "Quiet Precision" -->
+<header class="fixed top-0 w-full z-50 flex justify-between items-center px-margin-side h-14 bg-background/80 backdrop-blur-md border-b border-outline-variant">
+<div class="flex items-center gap-2">
+<!-- Brand Wordmark -->
+<span class="font-wordmark text-wordmark text-on-surface tracking-tight uppercase">Boyfriend Camera</span>
+</div>
+<button class="hover:opacity-80 transition-opacity active:scale-95 transition-transform">
+<span class="material-symbols-outlined text-on-surface" data-icon="settings">settings</span>
+</button>
+</header>
+<!-- Main Content: Library Grid -->
+<!-- 3-column grid, square thumbnails, 3px gutters -->
+<main class="pt-14 pb-32 min-h-screen">
+<div class="grid grid-cols-3 gutters-3px w-full">
+<!-- Grid Item 1 (Processing State) -->
+<div class="relative aspect-square bg-surface-container-low group overflow-hidden">
+<img class="w-full h-full object-cover grayscale transition-all duration-700 group-hover:scale-105" data-alt="A cinematic, high-fashion portrait of a woman with dramatic lighting against a dark, moody background. The aesthetic is professional and polished, with deep blacks and sharp focus on the textures of her designer clothing. The lighting creates a high-contrast, technical instrument look, consistent with a professional camera lens output." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAaGMJrqGgkgsiBYMhgcLaPZfR1TeYYUvoNueve-c1_KEKPmM21NWW2weuTF7J2upTD5YAI4kXOx77BniKmEV9IWO0wrWxbWV5iEd-QEF7ErcIo4f4Wn6VGKVY3Zfh7BFyJm6xPEeuVNjfIlli9Ei7YnRbQVGFqTkdLd7aRTfOuupmyaqvAURfKMwoyj69yL-UINezjvwfN40aDtAWWLRQdmDEsV2FLBTVDk7k8Onl10lyJu6pOU-Tdq0XIUVJjQ0HS_JWx0HUMNVg"/>
+<!-- Processing Dot -->
+<div class="absolute bottom-2 right-2 w-[5px] h-[5px] bg-white rounded-full processing-dot shadow-[0_0_8px_rgba(255,255,255,0.8)]"></div>
+</div>
+<!-- Grid Item 2 -->
+<div class="relative aspect-square bg-surface-container-low group overflow-hidden">
+<img class="w-full h-full object-cover transition-all duration-700 group-hover:scale-105" data-alt="Technical close-up of high-end camera optics with reflections of a city at night. The image has a sharp, instrumental feel, with a focus on precision and technical mastery. Deep blacks dominate the scene, punctuated by vibrant green and blue lens flares. High-end equipment aesthetic for a dark-first environment." src="https://lh3.googleusercontent.com/aida-public/AB6AXuC2yCpOz5TA-q3tCH03H6cAE6_D2gjTRJGutFSHILntIeoS2-UyBdZmbpWpiZAvW7p7zQeSFbd63VBqf8KTu2-AAgBEpARUhabgvBfsCnHtb2wuDmb9_XK7DRtS44EFO9JIr7Y0pQqUx20JR7iX15DvgzDujWxpE45Qp_bhSrmFZZw48lFtKPmE9XnJIynNnJnJUBfVx72EiNV5F21fdMA8Q1YeJ0Qz7WwkU2N2WTCkOPw2pRA2TTXAcgLXhivC__RUFbu0LoYC34c"/>
+</div>
+<!-- Grid Item 3 -->
+<div class="relative aspect-square bg-surface-container-low group overflow-hidden">
+<img class="w-full h-full object-cover transition-all duration-700 group-hover:scale-105" data-alt="A minimalist architectural shot of a brutalist concrete building against a night sky. The lighting is cold and precise, highlighting the geometric lines and textures of the surface. Pure black shadows create intense contrast. The mood is sophisticated and restrained, aligning with a quiet precision design philosophy." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCcDhDp-goszckwQ9RsB2nVs1BrYTy7BzqdTR66ewnOQNj1fn6IqJfAE7pKR21_gKWcs5Mt33FGTw4dbaGGhEQS-9pJoTMYBY-YaoYOGBxyRPMMYOJF08FGMtJuzxXI3UCMayiaGugYn0DgtkvUhrIoRgY-Ve4exFmxItpy5x2OtynC93Z1qAnYnZHsK5hriLYBJDVWCwxtIxZE4Vub3ajLBOw698GMRtF_diRtFnXA4_bKpaQKr8bA3i7pLqjP3QKFsFJZteFHECM"/>
+</div>
+<!-- Grid Item 4 -->
+<div class="relative aspect-square bg-surface-container-low group overflow-hidden">
+<img class="w-full h-full object-cover transition-all duration-700 group-hover:scale-105" data-alt="A high-contrast fashion photograph of a man in a structured coat standing in a dimly lit urban alleyway. Harsh, intentional shadows define the composition. The color palette is restricted to monochrome tones with a hint of emerald green in the background lights. Professional equipment look with OLED-optimized black levels." src="https://lh3.googleusercontent.com/aida-public/AB6AXuB03UiXVPCLY4FuWdi4ppRz7IWGqGkKvCwQpjPRbmkKW9XzAKPnxjGif7yeVdiF-5XaSCl0HDiJ6GRrUtmoPQRQHpDml_bGtIvDKRAzRbtYHE68aBGWe_1GdVO9IACV_xKhiXOt0Q3J-tHRFbJuioEILh8WD63hF8bEDmWbliGx1TXFlA_NK8tMeRmBB9-_SO2Wwo542uTXcsNc01a027WJopLE57yNZUY-b1AEeSC9FsAaxbm9Qg68tawPYWCnysrVX9wblmeOiHA"/>
+</div>
+<!-- Grid Item 5 -->
+<div class="relative aspect-square bg-surface-container-low group overflow-hidden">
+<img class="w-full h-full object-cover transition-all duration-700 group-hover:scale-105" data-alt="An abstract macro photograph of water droplets on a dark metallic surface. Each droplet reflects a sharp, tiny point of light, resembling a star chart or technical data display. The aesthetic is clean, sharp, and technical. The lighting is focused and cinematic, maintaining the brand's premium, technical feel." src="https://lh3.googleusercontent.com/aida-public/AB6AXuB1S_ScvfxqcfKajoWchlJ8bLrPWty1b27MYfSPV_wzsSc7hfMqovHt43-FmISi-5ydD9lPZ4Nw29_uxxcVxivjXbGPDHbE7tTJpLh2HYmtUyvT7NktlfWeFW-c4ge2baN4w4z1zpM_m0_aqGQSqCXIFrCLWmFgYdD9gtQYuWDS_Me-x5JDcKp7dcatjiikmi8dh-RkaIIAal_2jyAoRWodUcCEjjo89jzy048XKfenAGuTAeQHlNLY6eLmQ-XRGl6oAUm0L3w4kA4"/>
+</div>
+<!-- Grid Item 6 -->
+<div class="relative aspect-square bg-surface-container-low group overflow-hidden">
+<img class="w-full h-full object-cover transition-all duration-700 group-hover:scale-105" data-alt="A portrait of a model with glowing neon rim-lighting, set against an absolute black background. The light is a sharp cyan, defining the profile with surgical precision. The overall mood is futuristic and high-tech, evoking the feeling of a pro-level camera sensor capturing low-light detail perfectly." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDaFaAKEZUIxEvAV4hDPZe_cQjH_f7XKNXy-r0zks8fYsEidloSA7hzUfmTlFnFUhxw8htazhxx7La6uG1NkzBeA5Nh7QxxdAJ8LdH3qME_p9E9WyWDovfgNbjlrgwck2B00kcCOunjPTb66NO2Sztod0tHMRL5Re_bZskVVEof2cBnLn78AipFambkmEBkjL1KL9qiZC6K82LCNDh4W7MFC2AfpjOxtTq3ZcEFXUgpvkIbTJmWKmQ1300ZHd8QnyWoQllUQZQVUr8"/>
+</div>
+<!-- Grid Item 7 -->
+<div class="relative aspect-square bg-surface-container-low group overflow-hidden">
+<img class="w-full h-full object-cover transition-all duration-700 group-hover:scale-105" data-alt="A top-down view of a vintage film camera and a modern smartphone lens placed together on a dark granite surface. The composition is clean and symmetric, emphasizing the evolution of photography tools. High-key light glints off the glass elements. Professional corporate precision and technical mastery are conveyed through the sharp focus." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCztySO3MybOng6IQAXP9qAIy3k4JFrBZRvj3qpOAIL9QZ_o2tr-o1Hmc8zHAvIYkbVilorU0OhFLHLFsR3gPZh22Q30-U2CVb4Gog4qkKEV8fMyzbAb_mU7iW6rl32nMRdO9TmHiWEkM79JBgCvGAitSO778hzYD2AnXeynxB8TWtVnfU5hPlKagseJFt6eCYQV29HB41ksNuLm9MEKAs2xYPj65CgVBLiPw3FX4cdAvA1G4mMRXVoYXEKlirqTE-XssTMmI2LCCw"/>
+</div>
+<!-- Grid Item 8 -->
+<div class="relative aspect-square bg-surface-container-low group overflow-hidden">
+<img class="w-full h-full object-cover transition-all duration-700 group-hover:scale-105" data-alt="A moody, long-exposure shot of car taillights blurring into red streaks through a city rain. The deep black asphalt reflects the light with high contrast. The image feels like a high-end lens test, showcasing dynamic range and technical clarity. Restrained, professional, and atmospheric visual style." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAiosw_zkHvWGwmjLSp4QBDikxy0t00Z7M94tIhKnUDOkE8K1II9Y560PsmUTt3G35IaMznugsQMJQX-Cy63r8BBO2UBtYX3Gi-JBNG8BQ-XnD5y3cfanA4dBbcwDsAxzIa1w2UmEaa6Kv-pEXjjkyw2VAuaj639zHYlJ_dTsgu08Tozxl-64Hkj3mKsBypbToJ9xRJ8yGRH4x1Vy_ggqoC4tvhvECoIeQ7vSO5nRTBon-g1Oi8bbCexkOhiRUmLpPwrFJIrZelb6A"/>
+</div>
+<!-- Grid Item 9 -->
+<div class="relative aspect-square bg-surface-container-low group overflow-hidden">
+<img class="w-full h-full object-cover transition-all duration-700 group-hover:scale-105" data-alt="A minimalist still life of a single geometric glass prism catching a beam of white light in a dark room. The light splits into a subtle spectrum, rendered with extreme sharpness. The image represents the technical perfection and clarity of professional optics. Pure black foundation for OLED display." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDmrmuDzSpa8pP28WfOgGcyTrK8wgnxjwVK-mH-XxZ-Pn8cMG0xKU6dj16qwC5KVDpzydzAyxoth6O_3FlhSnh_RP8St0_UoOn4_Ez7Tbs9KFGlmvUgbCeKSXpInNpo1MCDKQZ9O85aIoy5T1cPpYWZU7l647JDxQZBYG2xGOH_0dfYW_0lv9hjnIA2mdCFYlZLpIf5zxh-DtqZnwOSMYj0_Tix_cCv6pSazM4gP7yBuNkpBfa3OU41Eifv9zlO_XiF9qYcH9ZR5Y4"/>
+</div>
+<!-- Repeat for fuller grid -->
+<div class="relative aspect-square bg-surface-container-low group overflow-hidden">
+<img class="w-full h-full object-cover opacity-80" data-alt="Cinematic street photography at night, high-end aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAp8gHcfY9VB6312D6z4N1sGvNkJFtKYcLjfSOc1gcgEOMCSQi88N2XWWlu9Nc0SBJXgO36Op4x1_s01b9sgEVz5iEeJ7DUGrGAfSeL4xcyWBCK-mD8Ld6g-Iej3LCz95snOijANpiSxj8-kzXzjM9qw4p-1ZUYX5rAwBExJL77lbTn8giluox5jns9JR6CgF3zJ0Kjwf7-LHiQusVNqojnQM0AOg4WpBE270FpLA1aFW4yCeuVIcSiOmtQjXFT3JeGi8ep5RZEgHA"/>
+</div>
+<div class="relative aspect-square bg-surface-container-low group overflow-hidden">
+<img class="w-full h-full object-cover opacity-80" data-alt="Fashion editorial portrait, technical lighting." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBN7HsxoKZubQTffkbc1rpevl4bjcZGU7YMELpwnlZc6ecpS2C-H5zdv-ccolaDhLGhLj4HiNUGg7iaS9ifiVeaJZ5r9ryUqaryKtJZfIyTq0Cdh6D0AETenaN4iyW_TAQcxh99nQryVDcVpK1Tr4nB18R5mnfuFHkqT5JmkzZmKXwaFF9x1OJgv-K571HinwaZHovxFUQeUracn8u7gIE0wDcE8iAZgRG02L-vEtsZ1yQYcK2j-YWl9ljJkCKL4oqeb6k83B6yi1g"/>
+</div>
+<div class="relative aspect-square bg-surface-container-low group overflow-hidden">
+<img class="w-full h-full object-cover opacity-80" data-alt="Architectural detail, minimalist luxury." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBtaakWIqFCETb_CnWZNoXfU_6lxUCjROiLTPwAxtIIYOhYFcqyLNFlHTN28SKmQN2yVaBypdvTQunAvgXvrBxjVUQx908rhNIAGzh4H63DsWa6gjIVh5OpgHv_uTeIZIfHXmpddiN3TtiA34EEV_jGEOn7JOurhJEY8vxnWHoXzlONrqUrY9CjYYeIuIfgLAlLIkjgyi81npiTbHY05nQvFWeuNM0J0bMPAaLABNNYMC9b3m67WrAuw-0-nvmB-yP-L06Z4diqcmg"/>
+</div>
+</div>
+</main>
+<!-- Bottom Navigation Shell -->
+<!-- Authority: JSON "BottomNavBar" + Style Guidance (Opaque surface-1, hairline border) -->
+<nav class="fixed bottom-0 w-full z-50 flex justify-around items-center px-margin-side pb-safe-area-bottom pt-3 bg-surface-container-low border-t-[0.5px] border-outline-variant backdrop-blur-xl">
+<!-- Add Photos (Inactive but with Micro Label) -->
+<button class="flex flex-col items-center justify-center text-on-surface-variant px-4 py-2 hover:bg-surface-bright/10 transition-colors active:scale-98">
+<span class="material-symbols-outlined mb-1" data-icon="add_a_photo">add_a_photo</span>
+<span class="font-micro text-micro tracking-tight">Add Photos</span>
+</button>
+<!-- Start Shooting (Active State) -->
+<button class="flex flex-col items-center justify-center bg-secondary-container text-on-secondary-container rounded-full px-8 py-3 active:scale-95 transition-all shadow-lg shadow-secondary/20">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined" data-icon="photo_camera" style="font-variation-settings: 'FILL' 1;">photo_camera</span>
+<span class="font-cta text-cta uppercase tracking-widest">Start Shooting</span>
+</div>
+</button>
+<!-- Dummy Spacer for Layout Balance (As requested in 2-destination JSON logic) -->
+<div class="w-12 h-12 flex items-center justify-center opacity-0 pointer-events-none"></div>
+</nav>
+<!-- Interaction Script for Subtle Feedback -->
+<script>
+        document.querySelectorAll('button').forEach(button => {
+            button.addEventListener('touchstart', function() {
+                this.classList.add('opacity-70');
+            });
+            button.addEventListener('touchend', function() {
+                this.classList.remove</script></body></html>
