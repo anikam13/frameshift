@@ -80,10 +80,12 @@ struct CameraView: View {
 
                     Spacer(minLength: 0)
                 } else {
-                    // The grid scrolls under the translucent bottom chrome
-                    // (safeAreaInset keeps the last row reachable above it) —
+                    // The grid scrolls under the translucent bottom chrome —
                     // photos blurring through the bar are the cue that more
-                    // content continues below the fold.
+                    // content continues below the fold. The chrome inset
+                    // doesn't propagate into the grid's ScrollView, so the
+                    // grid pads its scroll content by `bottomChromeHeight`
+                    // to keep the last row reachable.
                     ReferencesView()
                         .safeAreaInset(edge: .bottom, spacing: 0) {
                             bottomControls
@@ -278,7 +280,7 @@ struct CameraView: View {
                     TiltPitchGuide(
                         roll: vm.deviceRoll,
                         pitch: vm.devicePitch,
-                        targetRoll: activeSpec?.targetRoll ?? 0,
+                        targetRoll: activeSpec?.coachRollTarget ?? 0,
                         targetPitch: activeSpec?.targetPitch ?? 0,
                         isLevel: vm.isLevel,
                         showPitch: activeSpec?.hasTrustedPitch ?? true
@@ -481,6 +483,11 @@ struct CameraView: View {
     }
 
     // MARK: Bottom controls
+
+    /// `bottomControls`' height: top padding 14 + shutter row 74 + spacing 16
+    /// + thumbnail row 46 + bottom padding 6. The references grid pads its
+    /// scroll content by this so the last row can scroll clear of the chrome.
+    static let bottomChromeHeight: CGFloat = 156
 
     private var bottomControls: some View {
         VStack(spacing: 16) {

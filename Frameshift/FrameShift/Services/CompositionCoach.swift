@@ -54,6 +54,19 @@ struct CompositionCoach {
     private let lightingSatisfy = 0.50
     private let lightingUnsatisfy = 0.38
 
+    /// Beyond ~52° of pitch, "level" barely means anything visually and the
+    /// gravity-projected roll signal is mostly noise — stop coaching roll.
+    static let rollCoachingPitchLimit = 0.9
+
+    /// Roll is gravity projected onto the screen plane, so its noise grows by
+    /// ~1/cos(pitch) as the phone tilts away from upright. Widen roll
+    /// tolerances by the same factor (capped) so a leveled-but-tilted-down
+    /// phone isn't nagged to "level" over sensor noise. Shared with
+    /// MotionService so the leveler UI and the tip agree.
+    static func rollToleranceScale(pitch: Double) -> Double {
+        min(3, 1 / max(0.33, cos(pitch)))
+    }
+
     func evaluate(_ input: Input, previous: CompositionProgress) -> Output {
         var progress = previous
 
@@ -76,12 +89,17 @@ struct CompositionCoach {
             progress.tiltOK = true
         }
 
-        let targetRoll = input.spec.targetRoll ?? 0
-        progress.levelOK = hysteresis(
-            current: abs(input.roll - targetRoll) < levelSatisfy,
-            wasOK: previous.levelOK,
-            bad: abs(input.roll - targetRoll) > levelUnsatisfy
-        )
+        if abs(input.pitch) > Self.rollCoachingPitchLimit {
+            progress.levelOK = true
+        } else {
+            let scale = Self.rollToleranceScale(pitch: input.pitch)
+            let targetRoll = input.spec.coachRollTarget
+            progress.levelOK = hysteresis(
+                current: abs(input.roll - targetRoll) < levelSatisfy * scale,
+                wasOK: previous.levelOK,
+                bad: abs(input.roll - targetRoll) > levelUnsatisfy * scale
+            )
+        }
 
         let ref = input.referenceSubject
         var rawFramingGood = false
@@ -131,8 +149,19 @@ struct CompositionCoach {
             if centerDelta > unsatisfyThreshold { return Tip(kind: .horizontal, message: "Step right") }
             if centerDelta < -unsatisfyThreshold { return Tip(kind: .horizontal, message: "Step left") }
         }
-        if !progress.levelOK {
-            return Tip(kind: .level, message: "Level your phone")
+        // Angle tips only make sense while composing an actual subject —
+        // with nobody detected they'd be the nonsense fallback instruction.
+        if input.liveSubject != nil {
+            if input.spec.hasTrustedPitch, !progress.tiltOK {
+                let target = input.spec.targetPitch ?? 0
+                return Tip(
+                    kind: .tilt,
+                    message: input.pitch > target ? "Tilt down a bit" : "Tilt up a bit"
+                )
+            }
+            if !progress.levelOK {
+                return Tip(kind: .level, message: "Level your phone")
+            }
         }
         return nil
     }

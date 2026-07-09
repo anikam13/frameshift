@@ -53,6 +53,18 @@ struct ShotSpec: Equatable {
 
     var hasTrustedPitch: Bool { pitchConfidence >= Self.minimumPitchConfidence }
 
+    /// Below this, a nonzero `targetRoll` (e.g. a spurious low-confidence
+    /// horizon detection) is not coached against — fall back to level.
+    static let minimumRollConfidence: Double = 0.4
+
+    /// Roll target for live coaching: the estimate when trusted, level
+    /// otherwise. RollEstimator's no-signal tier already stores 0, so this
+    /// only changes behavior for untrusted nonzero targets.
+    var coachRollTarget: Double {
+        guard let targetRoll, rollConfidence >= Self.minimumRollConfidence else { return 0 }
+        return targetRoll
+    }
+
     /// Oriented size Vision / UIImage use for display coordinates.
     let referenceSize: CGSize
 

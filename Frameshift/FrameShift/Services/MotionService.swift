@@ -15,8 +15,10 @@ class MotionService: ObservableObject {
     /// isLevel latches with hysteresis: sensor noise at a single hard
     /// threshold flips the flag many times a second right at lock, which
     /// re-fires the lock haptic and makes the leveler's yellow state flicker.
-    private let levelEnterThreshold: Double = 0.02
-    private let levelExitThreshold: Double = 0.035
+    /// Values match CompositionCoach's levelSatisfy/levelUnsatisfy so the
+    /// leveler UI and the "Level your phone" tip never disagree.
+    private let levelEnterThreshold: Double = 0.025
+    private let levelExitThreshold: Double = 0.04
 
     func start() {
         guard motionManager.isDeviceMotionAvailable else { return }
@@ -41,11 +43,19 @@ class MotionService: ObservableObject {
             // flutter at their thresholds while the user fine-tunes.
             self.pitch = Self.smoothedAngle(current: self.pitch, target: atan2(g.z, -g.y), alpha: 0.3)
 
-            let rollDeviation = abs(self.roll - self.targetRoll)
-            if self.isLevel {
-                if rollDeviation > self.levelExitThreshold { self.isLevel = false }
-            } else if rollDeviation < self.levelEnterThreshold {
+            // Same pitch relaxation as the coach: past the limit "level" is
+            // meaningless, and short of it the noisy projected roll gets a
+            // proportionally wider band.
+            if abs(self.pitch) > CompositionCoach.rollCoachingPitchLimit {
                 self.isLevel = true
+            } else {
+                let scale = CompositionCoach.rollToleranceScale(pitch: self.pitch)
+                let rollDeviation = abs(self.roll - self.targetRoll)
+                if self.isLevel {
+                    if rollDeviation > self.levelExitThreshold * scale { self.isLevel = false }
+                } else if rollDeviation < self.levelEnterThreshold * scale {
+                    self.isLevel = true
+                }
             }
         }
     }

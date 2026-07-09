@@ -31,20 +31,56 @@ struct ReferencesView: View {
             // No toolbar "+": this view only ever appears in reference mode,
             // where the shutter-position picker below is already the add
             // button — two plus buttons on one screen read as a bug.
+            // Selection controls live in the toolbar (like Photos' Select
+            // mode): a bottom bar can't work here — the camera chrome is a
+            // safe-area inset layered over this whole view, and it swallows
+            // taps aimed at anything near the bottom edge.
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { showSettings = true } label: {
-                        Image(systemName: "gearshape")
+                if isSelecting {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Cancel") { exitSelection() }
+                    }
+                    ToolbarItem(placement: .principal) {
+                        Text(selectedIDs.isEmpty
+                             ? "Select photos"
+                             : "\(selectedIDs.count) selected")
+                            .font(.system(size: 15, weight: .semibold))
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            confirmDeleteSelection = true
+                        } label: {
+                            Image(systemName: "trash")
+                                .foregroundStyle(selectedIDs.isEmpty ? Color.secondary : .red)
+                        }
+                        .disabled(selectedIDs.isEmpty)
+                        .accessibilityIdentifier("delete-selected-references")
+                    }
+                } else {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button { showSettings = true } label: {
+                            Image(systemName: "gearshape")
+                        }
+                    }
+                    ToolbarItem(placement: .principal) {
+                        wordmark
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { showHowTo = true } label: {
+                            Image(systemName: "info.circle")
+                        }
                     }
                 }
-                ToolbarItem(placement: .principal) {
-                    wordmark
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showHowTo = true } label: {
-                        Image(systemName: "info.circle")
-                    }
-                }
+            }
+            // Presenting from navigation content — outside the stack the
+            // dialog silently never appears.
+            .confirmationDialog(
+                "Delete \(selectedIDs.count) reference\(selectedIDs.count == 1 ? "" : "s")?",
+                isPresented: $confirmDeleteSelection,
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) { deleteSelection() }
+                Button("Cancel", role: .cancel) {}
             }
         }
         .onChange(of: picks) { _, items in
@@ -58,19 +94,32 @@ struct ReferencesView: View {
         .sheet(isPresented: $showHowTo) {
             HowToSheet()
         }
+        .onAppear {
+            #if DEBUG
+            // UI-test hook: synthetic taps/long-presses on the grid cells are
+            // unreliable, so tests enter selection mode with two references
+            // pre-selected and drive only the delete path.
+            if ProcessInfo.processInfo.arguments.contains("-uitest-start-selecting") {
+                isSelecting = true
+                selectedIDs = Set(appState.references.prefix(2).map(\.id))
+            }
+            #endif
+        }
     }
 
     /// App wordmark in the bar above the References title. System font only
-    /// (design-token rule) — the viewfinder glyph in camera yellow carries
-    /// the brand.
+    /// (design-token rule) — the bare viewfinder outline and "Frame" in
+    /// camera yellow carry the brand.
     private var wordmark: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "camera.viewfinder")
-                .font(.system(size: 14, weight: .semibold))
+        HStack(spacing: 6) {
+            Image(systemName: "viewfinder")
+                .font(.system(size: 19, weight: .semibold))
                 .foregroundStyle(Color.cameraYellow)
-            Text("FrameShift")
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white)
+            (
+                Text("Frame").foregroundStyle(Color.cameraYellow)
+                + Text("Shift").foregroundStyle(.white)
+            )
+            .font(.system(size: 21, weight: .semibold, design: .rounded))
         }
     }
 
@@ -129,52 +178,14 @@ struct ReferencesView: View {
             .padding(.top, 8)
             .padding(.bottom, 24)
         }
-        // Stacks with the translucent camera chrome inset applied outside,
-        // so the bar floats above it rather than behind it.
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if isSelecting { selectionBar }
-        }
-        .confirmationDialog(
-            "Delete \(selectedIDs.count) reference\(selectedIDs.count == 1 ? "" : "s")?",
-            isPresented: $confirmDeleteSelection,
-            titleVisibility: .visible
-        ) {
-            Button("Delete", role: .destructive) { deleteSelection() }
-            Button("Cancel", role: .cancel) {}
-        }
+        // The camera chrome is a safe-area inset applied around this whole
+        // view, but that inset doesn't propagate through the NavigationStack
+        // to this ScrollView — without an explicit margin the last row stops
+        // behind the chrome and can never scroll clear of it.
+        .contentMargins(.bottom, CameraView.bottomChromeHeight, for: .scrollContent)
     }
 
     // MARK: Selection
-
-    private var selectionBar: some View {
-        HStack {
-            Button("Cancel") { exitSelection() }
-                .font(.system(size: 16))
-                .foregroundStyle(.white)
-
-            Spacer()
-
-            Text(selectedIDs.isEmpty
-                 ? "Select photos"
-                 : "\(selectedIDs.count) selected")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.white.opacity(0.75))
-
-            Spacer()
-
-            Button {
-                confirmDeleteSelection = true
-            } label: {
-                Image(systemName: "trash")
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(selectedIDs.isEmpty ? .white.opacity(0.3) : .red)
-            }
-            .disabled(selectedIDs.isEmpty)
-        }
-        .padding(.horizontal, 20)
-        .frame(height: 52)
-        .background(.regularMaterial)
-    }
 
     private func toggleSelection(_ id: UUID) {
         if selectedIDs.contains(id) {

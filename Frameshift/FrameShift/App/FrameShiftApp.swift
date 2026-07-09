@@ -16,8 +16,17 @@ struct FrameShiftApp: App {
             }
             .environmentObject(appState)
             .preferredColorScheme(.dark)
-            .task { await appState.restoreReferences() }
+            .task {
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-uitest-seed-references") {
+                    appState.seedReferencesForUITests()
+                    return
+                }
+                #endif
+                await appState.restoreReferences()
+            }
             .task { await appState.restoreCapturedShots() }
+            .task { await appState.restoreFilterPresets() }
         }
     }
 }

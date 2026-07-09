@@ -18,7 +18,8 @@ App identity: product/target `FrameShift`, bundle ID `com.anirudhkamath.frameshi
 | Level / pitch | CoreMotion — `MotionService` (roll + pitch) |
 | Photo import | PhotosUI — `PhotosPicker` |
 | Photo export / save | Photos — PHPhotoLibrary (add-only) |
-| Export card rendering | CoreGraphics — `ExportService` |
+| Export card rendering | CoreGraphics — `ExportService` (dormant: no UI entry point since the gallery export button was removed) |
+| Post-capture filters | CoreImage — `FilterService` presets, reference color match, custom presets from picked photos (`FilterPresetSheet` via gallery wand; persisted by `FilterPresetStore`) |
 | Haptics | UIKit — UIImpactFeedbackGenerator |
 | UI | SwiftUI throughout |
 
@@ -145,9 +146,9 @@ Live coaching (when an active reference has a `ShotSpec`): head circle (`Subject
 2. `AppState.addCapturedShot` inserts display-sized image, writes JPEG to `CapturedStore`, add-only save via `PhotoLibrarySaver`
 3. Photos-denied → one-time non-blocking notice with Settings action
 
-### Export card
-- From gallery only (sliders icon) when the shot still has a resolvable `referenceID`
-- `ExportService.generateCard` + `saveAndShare` (present from topmost VC)
+### Export card (removed from UI)
+- The gallery's sliders-icon export button was removed — it duplicated the
+  share button. `ExportService` remains in the codebase with no entry point.
 
 ---
 
@@ -204,7 +205,7 @@ Import uses the system photo picker (no broad library read). Saving uses add-onl
 | Zoom pills, flash, front camera, burst, exposure drag | `CameraService` + `CameraView` |
 | Camera tool drawer (session guide toggles) | `CameraToolDrawer` |
 | Live subject coaching / match silhouette (beyond static box) | `LiveVisionAnalyzer`, `CompositionCoach`, `MatchSilhouetteOverlay` |
-| Post-shot recommendations screen | **Not shipped** — before/after export is gallery-only (`ExportService` via `GalleryPreviewView`) |
+| Post-shot recommendations screen | **Not shipped** — before/after export card was gallery-only, then its button was removed as redundant with share (`ExportService` is dormant) |
 
 Deferred (explicitly post-v1): accounts / paid features — see `accounts-paid-features-prd.md`.
 

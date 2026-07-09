@@ -13,6 +13,9 @@ class AppState: ObservableObject {
     // Captured shots (shown in the gallery preview)
     @Published var capturedShots: [CapturedPhoto] = []
 
+    // User-created filter presets (look-source photos), creation order.
+    @Published var filterPresets: [CustomFilterPreset] = []
+
     // Camera is the default mode; the REFERENCE · CAMERA pill switches this.
     @Published var selectedTab: Tab = .camera
 
@@ -20,6 +23,7 @@ class AppState: ObservableObject {
     private let analyzer = VisionAnalyzer()
     private let segmenter = PersonSegmenter()
     private let capturedStore = CapturedStore()
+    private let filterPresetStore = FilterPresetStore()
 
     // Photos add-only permission denied notice — shown once per app launch.
     @Published var photoLibraryDeniedNoticeVisible = false
@@ -213,20 +217,8 @@ class AppState: ObservableObject {
         return references.first { $0.id == id }
     }
 
-    /// Full-resolution images for export. Display bitmaps in memory are
-    /// downsampled; this reloads from disk for the share card.
-    func loadExportImages(shotID: UUID, referenceID: UUID) async -> (reference: UIImage, shot: UIImage)? {
-        await Task.detached(priority: .userInitiated) { [store, capturedStore] in
-            guard
-                let reference = store.loadFullImage(id: referenceID)?.image,
-                let shot = capturedStore.loadFullImage(id: shotID)
-            else { return nil }
-            return (reference, shot)
-        }.value
-    }
-
-    /// Full-resolution captured shot for filter rendering — same reload-from-
-    /// disk rationale as `loadExportImages`.
+    /// Full-resolution captured shot for filter rendering. Display bitmaps in
+    /// memory are downsampled; this reloads from disk.
     func loadFullShot(id: UUID) async -> UIImage? {
         await Task.detached(priority: .userInitiated) { [capturedStore] in
             capturedStore.loadFullImage(id: id)
@@ -265,6 +257,79 @@ class AppState: ObservableObject {
         capturedStore.saveManifest(CapturedStore.Manifest(
             shots: capturedShots.map {
                 .init(id: $0.id, capturedAt: $0.capturedAt, referenceID: $0.referenceID, isFavorite: $0.isFavorite)
+            }
+        ))
+    }
+
+    #if DEBUG
+    /// UI-test hook (`-uitest-seed-references` launch argument): in-memory
+    /// references only, no disk writes, no Vision analysis.
+    func seedReferencesForUITests(count: Int = 4) {
+        let colors: [UIColor] = [.systemRed, .systemBlue, .systemGreen, .systemOrange]
+        references = (0..<count).map { index in
+            let size = CGSize(width: 300, height: 400)
+            let image = UIGraphicsImageRenderer(size: size).image { context in
+                colors[index % colors.count].setFill()
+                context.fill(CGRect(origin: .zero, size: size))
+            }
+            var photo = ReferencePhoto(image: image)
+            photo.analysisFailed = true   // stable "No subject" section, no spinner
+            return photo
+        }
+        selectedTab = .references
+    }
+    #endif
+
+    // MARK: Custom filter presets
+
+    /// Creates a preset from a look-source photo picked in the filter sheet.
+    /// The image arrives already downsampled — only its color stats matter.
+    @discardableResult
+    func addFilterPreset(from image: UIImage) -> CustomFilterPreset {
+        // Numbering survives deletes: one past the highest existing number,
+        // so a fresh preset never takes a deleted one's name.
+        let nextNumber = (filterPresets.compactMap { preset in
+            preset.name.hasPrefix("Preset ") ? Int(preset.name.dropFirst(7)) : nil
+        }.max() ?? 0) + 1
+        let preset = CustomFilterPreset(
+            id: UUID(), name: "Preset \(nextNumber)", image: image, createdAt: Date()
+        )
+        filterPresets.append(preset)
+
+        let id = preset.id
+        Task.detached(priority: .utility) { [filterPresetStore] in
+            guard
+                let data = image.jpegData(compressionQuality: 0.85),
+                filterPresetStore.saveImageData(data, id: id)
+            else {
+                await MainActor.run { self.showTransientNotice("Couldn't save this preset") }
+                return
+            }
+        }
+        persistFilterPresetManifest()
+        return preset
+    }
+
+    func removeFilterPreset(id: UUID) {
+        filterPresets.removeAll { $0.id == id }
+        Task.detached(priority: .utility) { [filterPresetStore] in
+            filterPresetStore.deleteImage(id: id)
+        }
+        persistFilterPresetManifest()
+    }
+
+    /// Reloads persisted filter presets on launch.
+    func restoreFilterPresets() async {
+        guard filterPresets.isEmpty else { return }
+        filterPresets = await Task.detached(priority: .userInitiated) { [filterPresetStore] in
+            filterPresetStore.loadAll()
+        }.value
+    }
+
+    private func persistFilterPresetManifest() {
+        filterPresetStore.saveManifest(FilterPresetStore.Manifest(
+            presets: filterPresets.map {
+                .init(id: $0.id, name: $0.name, createdAt: $0.createdAt)
             }
         ))
     }

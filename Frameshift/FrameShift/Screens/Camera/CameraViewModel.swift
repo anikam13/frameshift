@@ -236,6 +236,10 @@ class CameraViewModel: ObservableObject {
 
     func flipCamera() {
         isFrontCamera.toggle()
+        // MotionService compares raw physical roll, so its target flips with
+        // the mirrored preview (deviceRoll handles the visual-space side).
+        motion.targetRoll = physicalRollTarget(for: activeSpec)
+        deviceRoll = -deviceRoll
         let levels = zoomLevels
         if !levels.contains(zoomFactor) {
             zoomFactor = 1
@@ -347,8 +351,15 @@ class CameraViewModel: ObservableObject {
         }
     }
 
+    /// Physical-space roll target for MotionService's level latch: negated on
+    /// the front camera, whose mirrored preview flips apparent rotation.
+    private func physicalRollTarget(for spec: ShotSpec?) -> Double {
+        let target = spec?.coachRollTarget ?? 0
+        return isFrontCamera ? -target : target
+    }
+
     private func applySpec(_ spec: ShotSpec?) {
-        motion.targetRoll = spec?.targetRoll ?? 0
+        motion.targetRoll = physicalRollTarget(for: spec)
         guard let spec else { return }
         if zoomLevels.contains(spec.recommendedZoom) {
             setZoom(spec.recommendedZoom)
@@ -420,8 +431,12 @@ class CameraViewModel: ObservableObject {
     private func observeMotion() {
         motion.$roll
             .sink { [weak self] roll in
-                self?.deviceRoll = roll
-                self?.evaluateCoaching()
+                guard let self else { return }
+                // Preview-visual space: the front camera mirrors the preview,
+                // which flips apparent rotation, so the coach/leveler/tilt
+                // guide track what the user sees rather than physical roll.
+                self.deviceRoll = self.isFrontCamera ? -roll : roll
+                self.evaluateCoaching()
             }
             .store(in: &cancellables)
 

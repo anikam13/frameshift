@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Apple Camera-style photo preview, opened from the bottom-left thumbnail.
 /// Back chevron + date pill up top, swipeable photo, filmstrip, and the
-/// share · heart · info · export toolbar.
+/// share · heart · info · filters toolbar.
 struct GalleryPreviewView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
@@ -11,8 +11,6 @@ struct GalleryPreviewView: View {
     @State private var confirmDelete = false
     @State private var showInfoSheet = false
     @State private var filterTarget: CapturedPhoto?
-
-    private let exportService = ExportService()
 
     private var shots: [CapturedPhoto] { appState.capturedShots }
     private var current: CapturedPhoto? { shots.first { $0.id == selectedID } }
@@ -191,15 +189,6 @@ struct GalleryPreviewView: View {
                         .font(.system(size: 18, weight: .medium))
                         .foregroundStyle(.white)
                 }
-                if let reference = appState.reference(for: current?.referenceID) {
-                    Button {
-                        exportCard(reference: reference)
-                    } label: {
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.system(size: 18, weight: .medium))
-                            .foregroundStyle(.white)
-                    }
-                }
             }
             .padding(.horizontal, 30)
             .frame(height: 50)
@@ -227,26 +216,6 @@ struct GalleryPreviewView: View {
         guard let current else { return }
         appState.setFavorite(id: current.id, isFavorite: !current.isFavorite)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-    }
-
-    private func exportCard(reference: ReferencePhoto) {
-        guard
-            let current,
-            let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-            let root = windowScene.windows.first?.rootViewController
-        else { return }
-        let shotID = current.id
-        let referenceID = reference.id
-        Task {
-            // Prefer full-res from disk; fall back to in-memory display images.
-            let images = await appState.loadExportImages(shotID: shotID, referenceID: referenceID)
-            let referenceImage = images?.reference ?? reference.image
-            let shotImage = images?.shot ?? current.image
-            guard let card = exportService.generateCard(
-                reference: referenceImage, shot: shotImage, format: .story
-            ) else { return }
-            exportService.saveAndShare(image: card, from: root, appState: appState)
-        }
     }
 
     private func deleteCurrent() {
