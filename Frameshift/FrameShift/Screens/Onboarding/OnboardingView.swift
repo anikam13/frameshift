@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// First-launch onboarding: four swipeable pages introducing the
-/// reference → guided-framing → before/after loop. Shown once; completion
+/// reference → guided-framing → tips loop. Shown once; completion
 /// is persisted so it never reappears after the user finishes it.
 struct OnboardingView: View {
     /// True when reached via Settings' "Replay Onboarding" rather than the
@@ -19,20 +19,20 @@ struct OnboardingView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            TabView(selection: $page) {
-                OnboardingWelcomePage().tag(0)
-                OnboardingReferencesPage().tag(1)
-                OnboardingCameraPage().tag(2)
-                OnboardingComparePage().tag(3)
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
+            VStack(spacing: 0) {
+                TabView(selection: $page) {
+                    OnboardingWelcomePage().tag(0)
+                    OnboardingReferencesPage().tag(1)
+                    OnboardingCameraPage().tag(2)
+                    OnboardingComparePage().tag(3)
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
 
-            VStack {
-                Spacer()
                 dots
                     .padding(.bottom, 18)
                 actionButton
-                    .padding(.bottom, 28)
+                    .frame(height: 54)
+                    .padding(.bottom, 24)
             }
 
             if isReplay {
@@ -59,11 +59,12 @@ struct OnboardingView: View {
     private var dots: some View {
         HStack(spacing: 8) {
             ForEach(0..<pageCount, id: \.self) { index in
-                Circle()
+                Capsule()
                     .fill(index == page ? Color.cameraYellow : Color.white.opacity(0.3))
-                    .frame(width: 7, height: 7)
+                    .frame(width: index == page ? 20 : 7, height: 7)
             }
         }
+        .animation(.snappy(duration: 0.25), value: page)
     }
 
     @ViewBuilder

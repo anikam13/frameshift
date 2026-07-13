@@ -145,6 +145,15 @@ enum PitchEstimator {
 
         var angle = atan2(dy, dx)
         if let horizonAngle { angle -= horizonAngle }
+        // The shoulder segment is undirected, but Vision's left/right are the
+        // subject's anatomy: facing the camera puts the left shoulder on the
+        // image's right, so dx < 0 and atan2 lands near ±π instead of the
+        // line's slope. Unfolded, the gain saturates that into a full
+        // ±maxPitch target whose sign is pixel noise in dy — the "chevrons
+        // demand a big tilt in a random direction" bug. Fold to the tilt
+        // from horizontal in (-π/2, π/2].
+        if angle > .pi / 2 { angle -= .pi }
+        if angle < -.pi / 2 { angle += .pi }
         return angle * shoulderPitchGain
     }
 

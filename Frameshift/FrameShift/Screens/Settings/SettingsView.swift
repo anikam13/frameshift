@@ -14,7 +14,6 @@ struct SettingsView: View {
     @AppStorage(CameraViewModel.DefaultsKey.levelVisible.rawValue) private var defaultLevelVisible = true
     @AppStorage(CameraViewModel.DefaultsKey.headCircleVisible.rawValue) private var defaultHeadCircleVisible = true
     @AppStorage(CameraViewModel.DefaultsKey.tipsEnabled.rawValue) private var defaultTipsEnabled = true
-    @AppStorage(CameraViewModel.DefaultsKey.matchSilhouetteEnabled.rawValue) private var defaultMatchSilhouetteEnabled = true
 
     @AppStorage("frameshift.hasSeenReferenceHint") private var hasSeenReferenceHint = false
 
@@ -63,7 +62,6 @@ struct SettingsView: View {
             Toggle("Grid", isOn: $defaultGridVisible)
             Toggle("Head Circle", isOn: $defaultHeadCircleVisible)
             Toggle("Composition Tips", isOn: $defaultTipsEnabled)
-            Toggle("Match Flash", isOn: $defaultMatchSilhouetteEnabled)
         } header: {
             Text("Camera Guides")
         } footer: {

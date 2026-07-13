@@ -17,6 +17,9 @@ nonisolated struct CapturedStore {
             let capturedAt: Date
             let referenceID: UUID?
             var isFavorite: Bool
+            // Optional so manifests written before burst grouping still decode.
+            var burstID: UUID?
+            var isBurstBest: Bool?
         }
         var shots: [Entry]   // index 0 = newest, matches AppState order
     }
@@ -26,6 +29,8 @@ nonisolated struct CapturedStore {
         let capturedAt: Date
         let referenceID: UUID?
         let isFavorite: Bool
+        let burstID: UUID?
+        let isBurstBest: Bool
         let image: UIImage
     }
 
@@ -85,6 +90,8 @@ nonisolated struct CapturedStore {
                 capturedAt: entry.capturedAt,
                 referenceID: entry.referenceID,
                 isFavorite: entry.isFavorite,
+                burstID: entry.burstID,
+                isBurstBest: entry.isBurstBest ?? false,
                 image: image
             )
         }

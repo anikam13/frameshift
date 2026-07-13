@@ -2,7 +2,8 @@ import SwiftUI
 
 /// Apple Camera-style photo preview, opened from the bottom-left thumbnail.
 /// Back chevron + date pill up top, swipeable photo, filmstrip, and the
-/// share · heart · info · filters toolbar.
+/// share · heart · info · filters toolbar. A burst appears as one item —
+/// its best pick is the cover, and the burst badge opens a picker to choose.
 struct GalleryPreviewView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
@@ -10,21 +11,27 @@ struct GalleryPreviewView: View {
     @State var selectedID: UUID
     @State private var confirmDelete = false
     @State private var showInfoSheet = false
+    @State private var showBurstPicker = false
+    @State private var showLibrary = false
     @State private var filterTarget: CapturedPhoto?
 
     private var shots: [CapturedPhoto] { appState.capturedShots }
-    private var current: CapturedPhoto? { shots.first { $0.id == selectedID } }
+
+    private var items: [GalleryItem] { GalleryItem.group(shots) }
+
+    private var currentItem: GalleryItem? { items.first { $0.id == selectedID } }
+    private var current: CapturedPhoto? { currentItem?.cover }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
             TabView(selection: $selectedID) {
-                ForEach(shots) { shot in
-                    Image(uiImage: shot.image)
+                ForEach(items) { item in
+                    Image(uiImage: item.cover.image)
                         .resizable()
                         .scaledToFit()
-                        .tag(shot.id)
+                        .tag(item.id)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
@@ -33,6 +40,10 @@ struct GalleryPreviewView: View {
                 topBar
                     .padding(.horizontal, 14)
                     .padding(.top, 6)
+                if let item = currentItem, item.isBurst {
+                    burstBadge(item)
+                        .padding(.top, 10)
+                }
                 Spacer()
                 filmstrip
                     .padding(.bottom, 14)
@@ -42,12 +53,33 @@ struct GalleryPreviewView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .onAppear {
+            // Callers pass a shot id; if that shot is inside a burst, the
+            // pager's pages are keyed by the burst's id instead.
+            if let owner = items.first(where: { item in item.shots.contains { $0.id == selectedID } }) {
+                selectedID = owner.id
+            }
+        }
         .confirmationDialog("", isPresented: $confirmDelete, titleVisibility: .hidden) {
-            Button("Delete Photo", role: .destructive) { deleteCurrent() }
+            Button(deleteButtonTitle, role: .destructive) { deleteCurrent() }
             Button("Cancel", role: .cancel) {}
         }
         .sheet(isPresented: $showInfoSheet) {
             CaptureInfoSheet(shot: current, reference: appState.reference(for: current?.referenceID))
+        }
+        .fullScreenCover(isPresented: $showLibrary) {
+            GalleryLibraryView(selectedID: $selectedID)
+                .environmentObject(appState)
+        }
+        .sheet(isPresented: $showBurstPicker) {
+            if let item = currentItem, let burstID = item.shots[0].burstID {
+                BurstPickerSheet(burstID: burstID) { keptID in
+                    // The burst collapsed to one photo; its page is now keyed
+                    // by the surviving shot's id.
+                    selectedID = keptID
+                }
+                .environmentObject(appState)
+            }
         }
         .fullScreenCover(item: $filterTarget) { shot in
             FilterPresetSheet(shot: shot) { newID in
@@ -70,6 +102,14 @@ struct GalleryPreviewView: View {
             }
 
             Spacer()
+
+            Button { showLibrary = true } label: {
+                Image(systemName: "square.grid.2x2")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.white)
+                    .frame(width: 42, height: 42)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
         }
         .overlay {
             datePill
@@ -102,15 +142,36 @@ struct GalleryPreviewView: View {
         return date.formatted(date: .omitted, time: .shortened)
     }
 
+    // MARK: Burst badge
+
+    private func burstBadge(_ item: GalleryItem) -> some View {
+        Button { showBurstPicker = true } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "square.stack.3d.down.right")
+                    .font(.system(size: 12, weight: .semibold))
+                Text("Burst · \(item.shots.count) photos")
+                    .font(.system(size: 13, weight: .semibold))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.6))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(.ultraThinMaterial, in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
     // MARK: Filmstrip
 
     private var filmstrip: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 2) {
-                    ForEach(shots) { shot in
-                        filmstripThumb(shot)
-                            .id(shot.id)
+                    ForEach(items) { item in
+                        filmstripThumb(item)
+                            .id(item.id)
                     }
                 }
                 .padding(.horizontal, 20)
@@ -125,9 +186,9 @@ struct GalleryPreviewView: View {
         }
     }
 
-    private func filmstripThumb(_ shot: CapturedPhoto) -> some View {
-        let isSelected = shot.id == selectedID
-        return Image(uiImage: shot.image)
+    private func filmstripThumb(_ item: GalleryItem) -> some View {
+        let isSelected = item.id == selectedID
+        return Image(uiImage: item.cover.image)
             .resizable()
             .scaledToFill()
             .frame(width: isSelected ? 40 : 26, height: 42)
@@ -138,17 +199,28 @@ struct GalleryPreviewView: View {
             )
             // Surface favorites where you scan for them — the filmstrip.
             .overlay(alignment: .bottomTrailing) {
-                if shot.isFavorite {
+                if item.cover.isFavorite {
                     Image(systemName: "heart.fill")
                         .font(.system(size: isSelected ? 9 : 7))
                         .foregroundStyle(.red)
                         .padding(2)
                 }
             }
+            .overlay(alignment: .topLeading) {
+                if item.isBurst {
+                    Text("\(item.shots.count)")
+                        .font(.system(size: isSelected ? 8 : 7, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 3)
+                        .padding(.vertical, 1)
+                        .background(.black.opacity(0.55), in: Capsule())
+                        .padding(2)
+                }
+            }
             .padding(.horizontal, isSelected ? 4 : 0)
             .animation(.easeOut(duration: 0.15), value: isSelected)
             .onTapGesture {
-                withAnimation(.easeOut(duration: 0.2)) { selectedID = shot.id }
+                withAnimation(.easeOut(duration: 0.2)) { selectedID = item.id }
             }
     }
 
@@ -218,16 +290,28 @@ struct GalleryPreviewView: View {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
+    private var deleteButtonTitle: String {
+        guard let item = currentItem, item.isBurst else { return "Delete Photo" }
+        return "Delete Burst (\(item.shots.count) Photos)"
+    }
+
+    /// Deleting a burst page removes every shot in the burst.
     private func deleteCurrent() {
-        guard let index = shots.firstIndex(where: { $0.id == selectedID }) else { return }
-        let deletedID = selectedID
-        if shots.count > 1 {
-            let nextIndex = index == shots.count - 1 ? index - 1 : index + 1
-            selectedID = shots[nextIndex].id
-            appState.removeCapturedShot(id: deletedID)
-        } else {
-            appState.removeCapturedShot(id: deletedID)
-            dismiss()
+        let itemsBefore = items
+        guard
+            let item = currentItem,
+            let index = itemsBefore.firstIndex(where: { $0.id == item.id })
+        else { return }
+
+        if itemsBefore.count > 1 {
+            let nextIndex = index == itemsBefore.count - 1 ? index - 1 : index + 1
+            selectedID = itemsBefore[nextIndex].id
         }
+        if item.isBurst, let burstID = item.shots[0].burstID {
+            appState.removeBurst(burstID: burstID)
+        } else {
+            appState.removeCapturedShot(id: item.shots[0].id)
+        }
+        if itemsBefore.count <= 1 { dismiss() }
     }
 }

@@ -15,6 +15,5 @@ struct OnboardingWelcomePage: View {
             Spacer()
             Spacer()
         }
-        .padding(.bottom, 100)
     }
 }

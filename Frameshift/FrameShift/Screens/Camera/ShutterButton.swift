@@ -10,6 +10,8 @@ import SwiftUI
 /// native Camera app's press-and-hold behavior.
 struct ShutterButton: View {
     var isBursting: Bool = false
+    /// Shots landed so far in the current burst, shown inside the button.
+    var burstCount: Int = 0
     let onTap: () -> Void
     let onHoldStart: () -> Void
     let onHoldEnd: () -> Void
@@ -33,6 +35,14 @@ struct ShutterButton: View {
                 .frame(width: 62, height: 62)
                 .scaleEffect(isPressed ? 0.88 : 1.0)
                 .animation(.spring(response: 0.12, dampingFraction: 0.7), value: isPressed)
+
+            if isBursting && burstCount > 0 {
+                Text("\(burstCount)")
+                    .font(.system(size: 22, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.black)
+                    .contentTransition(.numericText())
+                    .animation(.snappy(duration: 0.12), value: burstCount)
+            }
         }
         .animation(.easeOut(duration: 0.15), value: isBursting)
         .contentShape(Circle())

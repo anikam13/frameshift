@@ -29,6 +29,4 @@ extension Color {
     static let gridLine     = Color.white.opacity(0.25)
     static let levelNeutral = Color.white.opacity(0.40)
     static let levelLocked  = Color(hex: "#FFD60A")
-    /// Light green "framing matched" silhouette flash.
-    static let matchGreen   = Color(hex: "#7CFC8A")
 }

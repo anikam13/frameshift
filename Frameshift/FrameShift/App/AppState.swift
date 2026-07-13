@@ -91,24 +91,36 @@ class AppState: ObservableObject {
             activeReferenceIndex = 0
         }
 
-        for entry in restored.references {
-            let id = entry.id
-            Task.detached(priority: .userInitiated) { [store, analyzer, segmenter] in
-                // Full-res decode only for this analysis pass — not retained in AppState.
-                guard let full = store.loadFullImage(id: id) else {
-                    await MainActor.run { self.markAnalysisFailed(for: id) }
-                    return
-                }
-                guard let spec = await analyzer.analyze(image: full.image, imageData: full.data)
-                else {
-                    await MainActor.run { self.markAnalysisFailed(for: id) }
-                    return
-                }
-                await MainActor.run { self.updateSpec(for: id, spec: spec) }
-                if let cutout = await segmenter.cutout(from: full.image) {
-                    let displayCutout = cutout.downsampled(maxPixelSize: UIImage.overlayMaxPixelSize)
-                    await MainActor.run { self.updateCutout(for: id, cutout: displayCutout) }
-                }
+        // One reference's analysis pass: full-res decode (not retained in
+        // AppState), Vision spec, then the ghost cutout.
+        let analyzeOne: @Sendable (UUID) async -> Void = { [store, analyzer, segmenter] id in
+            guard let full = store.loadFullImage(id: id) else {
+                await MainActor.run { self.markAnalysisFailed(for: id) }
+                return
+            }
+            guard let spec = await analyzer.analyze(image: full.image, imageData: full.data)
+            else {
+                await MainActor.run { self.markAnalysisFailed(for: id) }
+                return
+            }
+            await MainActor.run { self.updateSpec(for: id, spec: spec) }
+            if let cutout = await segmenter.cutout(from: full.image) {
+                let displayCutout = cutout.downsampled(maxPixelSize: UIImage.overlayMaxPixelSize)
+                await MainActor.run { self.updateCutout(for: id, cutout: displayCutout) }
+            }
+        }
+
+        // Launch-speed rule: never fan out one Vision pass per reference at
+        // launch — a parallel stampede of pose/face/segmentation models
+        // starves the camera session and first render. The active reference
+        // (the one live coaching needs) analyzes right away; the rest run
+        // one at a time at utility, yielding to camera and UI work.
+        let activeID = references[activeReferenceIndex].id
+        let queuedIDs = restored.references.map(\.id).filter { $0 != activeID }
+        Task.detached(priority: .userInitiated) {
+            await analyzeOne(activeID)
+            Task.detached(priority: .utility) {
+                for id in queuedIDs { await analyzeOne(id) }
             }
         }
     }
@@ -169,11 +181,19 @@ class AppState: ObservableObject {
     // MARK: Captured shots
 
     @discardableResult
-    func addCapturedShot(_ image: UIImage, referenceID: UUID?) -> UUID {
+    func addCapturedShot(_ image: UIImage, referenceID: UUID?, burstID: UUID? = nil) -> UUID {
         // Keep a display-sized bitmap in memory; write the capture-quality
         // JPEG to disk (and Photos) from the full image on a background task.
         let display = image.downsampled(maxPixelSize: UIImage.displayMaxPixelSize)
-        let shot = CapturedPhoto(image: display, referenceID: referenceID)
+        return insertCapturedShot(display: display, full: image, referenceID: referenceID, burstID: burstID)
+    }
+
+    /// Burst-path variant: the caller downsamples off the main actor first —
+    /// shots land up to 10/s during a burst, and downsampling each one here
+    /// would freeze the viewfinder for the whole hold.
+    @discardableResult
+    func insertCapturedShot(display: UIImage, full image: UIImage, referenceID: UUID?, burstID: UUID?) -> UUID {
+        let shot = CapturedPhoto(image: display, referenceID: referenceID, burstID: burstID)
         capturedShots.insert(shot, at: 0)
         persistCapturedManifest()
 
@@ -211,6 +231,50 @@ class AppState: ObservableObject {
         persistCapturedManifest()
     }
 
+    // MARK: Bursts
+
+    /// Marks one shot as its burst's best — the group's cover in the gallery.
+    func setBurstBest(id: UUID) {
+        guard
+            let shot = capturedShots.first(where: { $0.id == id }),
+            let burstID = shot.burstID
+        else { return }
+        for index in capturedShots.indices where capturedShots[index].burstID == burstID {
+            capturedShots[index].isBurstBest = (capturedShots[index].id == id)
+        }
+        persistCapturedManifest()
+    }
+
+    /// Deletes every shot captured in one burst.
+    func removeBurst(burstID: UUID) {
+        let ids = capturedShots.filter { $0.burstID == burstID }.map(\.id)
+        guard !ids.isEmpty else { return }
+        capturedShots.removeAll { $0.burstID == burstID }
+        persistCapturedManifest()
+        Task.detached(priority: .utility) { [capturedStore] in
+            for id in ids { capturedStore.deleteImage(id: id) }
+        }
+    }
+
+    /// Burst picker's "Keep Only This" — deletes the rest of the burst. The
+    /// survivor keeps its burstID but a one-shot group renders as a normal
+    /// photo in the gallery.
+    func keepOnlyBurstShot(id: UUID) {
+        guard
+            let keep = capturedShots.first(where: { $0.id == id }),
+            let burstID = keep.burstID
+        else { return }
+        let removeIDs = capturedShots
+            .filter { $0.burstID == burstID && $0.id != id }
+            .map(\.id)
+        guard !removeIDs.isEmpty else { return }
+        capturedShots.removeAll { removeIDs.contains($0.id) }
+        persistCapturedManifest()
+        Task.detached(priority: .utility) { [capturedStore] in
+            for id in removeIDs { capturedStore.deleteImage(id: id) }
+        }
+    }
+
     /// Resolves a captured shot's reference, tolerating deletion of the reference since.
     func reference(for id: UUID?) -> ReferencePhoto? {
         guard let id else { return nil }
@@ -237,10 +301,12 @@ class AppState: ObservableObject {
         persistCapturedManifest()
     }
 
-    /// Reloads persisted captured shots on launch.
+    /// Reloads persisted captured shots on launch. Utility priority: this
+    /// decodes a thumbnail per shot (bursts make that dozens), and only the
+    /// bottom-left gallery thumb shows it — it must not race camera startup.
     func restoreCapturedShots() async {
         guard capturedShots.isEmpty else { return }
-        let restored = await Task.detached(priority: .userInitiated) { [capturedStore] in
+        let restored = await Task.detached(priority: .utility) { [capturedStore] in
             capturedStore.loadAll()
         }.value
         capturedShots = restored
@@ -248,7 +314,8 @@ class AppState: ObservableObject {
             .map {
                 CapturedPhoto(
                     id: $0.id, image: $0.image, capturedAt: $0.capturedAt,
-                    referenceID: $0.referenceID, isFavorite: $0.isFavorite
+                    referenceID: $0.referenceID, isFavorite: $0.isFavorite,
+                    burstID: $0.burstID, isBurstBest: $0.isBurstBest
                 )
             }
     }
@@ -256,7 +323,10 @@ class AppState: ObservableObject {
     private func persistCapturedManifest() {
         capturedStore.saveManifest(CapturedStore.Manifest(
             shots: capturedShots.map {
-                .init(id: $0.id, capturedAt: $0.capturedAt, referenceID: $0.referenceID, isFavorite: $0.isFavorite)
+                .init(
+                    id: $0.id, capturedAt: $0.capturedAt, referenceID: $0.referenceID,
+                    isFavorite: $0.isFavorite, burstID: $0.burstID, isBurstBest: $0.isBurstBest
+                )
             }
         ))
     }
@@ -318,10 +388,11 @@ class AppState: ObservableObject {
         persistFilterPresetManifest()
     }
 
-    /// Reloads persisted filter presets on launch.
+    /// Reloads persisted filter presets on launch. Utility: nothing on the
+    /// camera screen needs these — first use is the gallery's filter sheet.
     func restoreFilterPresets() async {
         guard filterPresets.isEmpty else { return }
-        filterPresets = await Task.detached(priority: .userInitiated) { [filterPresetStore] in
+        filterPresets = await Task.detached(priority: .utility) { [filterPresetStore] in
             filterPresetStore.loadAll()
         }.value
     }

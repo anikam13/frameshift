@@ -18,21 +18,37 @@ class CameraViewModel: ObservableObject {
     @Published var isLevelVisible:      Bool = true
     @Published var isHeadCircleVisible: Bool = true
     @Published var tipsEnabled:         Bool = true
-    @Published var matchSilhouetteEnabled: Bool = true {
-        didSet {
-            guard !matchSilhouetteEnabled else { return }
-            silhouetteFadeTask?.cancel()
-            withAnimation(.easeOut(duration: 0.2)) { silhouetteVisible = false }
-        }
-    }
 
     @Published var zoomFactor:    CGFloat = 1
     @Published var isFrontCamera: Bool = false
     @Published var flashMode:     AVCaptureDevice.FlashMode = .off
 
+    /// Viewfinder (and therefore capture-crop) shape. The preview layer
+    /// aspect-fills its container and captures crop to the visible region,
+    /// so the box's ratio is the single source of truth. Session-only,
+    /// like the drawer's guide toggles.
+    enum CaptureAspect {
+        case fourThree    // full sensor frame — the right shape for feed posts
+        case sixteenNine  // 9:16 tall in portrait — the story/reel shape
+
+        /// width : height of the portrait viewfinder box.
+        var previewRatio: CGFloat {
+            switch self {
+            case .fourThree:   return 3.0 / 4.0
+            case .sixteenNine: return 9.0 / 16.0
+            }
+        }
+    }
+    @Published var captureAspect: CaptureAspect = .fourThree
+
     @Published var cameraAuthorizationState: CameraService.AuthorizationState = .unknown
     @Published var captureFailureNoticeVisible = false
     @Published private(set) var isBursting = false
+    /// Shots landed so far in the current shutter hold; shown in the shutter.
+    @Published private(set) var burstCount = 0
+    /// Brief viewfinder blackout pulsed once per captured frame, like the
+    /// native app's shutter blink.
+    @Published private(set) var shutterBlinkVisible = false
 
     @Published var deviceRoll:  Double = 0
     @Published var devicePitch: Double = 0
@@ -41,11 +57,6 @@ class CameraViewModel: ObservableObject {
     @Published var compositionProgress = CompositionProgress()
     @Published var activeTip: String?
     @Published var activeTipKind: CoachTipKind?
-
-    /// Brief green outline of the live subject, flashed once when framing
-    /// matches the reference (see evaluateCoaching's framingOK transition).
-    @Published var matchSilhouettePath: Path?
-    @Published var silhouetteVisible = false
 
     /// Viewfinder-local point of the last focus tap; drives the reticle overlay.
     @Published var focusPoint: CGPoint?
@@ -57,20 +68,20 @@ class CameraViewModel: ObservableObject {
     private var activeSpec: ShotSpec?
     private let coach = CompositionCoach()
     private let liveAnalyzer = LiveVisionAnalyzer()
-    private let silhouetteExtractor = LiveSilhouetteExtractor()
     private var liveSubjectRaw: CGRect?
     private var liveContentSize: CGSize = .zero
     private var viewfinderSize: CGSize = .zero
     private var lightingScore: Double = 0.5
-    /// Most recent live video frame, retained only so a framing-match event
-    /// has a frame to run person segmentation on — replaced every frame.
-    private var latestPixelBuffer: CVPixelBuffer?
 
     private var focusResetTask: Task<Void, Never>?
     private var focusReticleTask: Task<Void, Never>?
     private var captureFailureDismissTask: Task<Void, Never>?
     private var burstTask: Task<Void, Never>?
-    private var silhouetteFadeTask: Task<Void, Never>?
+    private var blinkTask: Task<Void, Never>?
+    /// Captures fired but not yet completed during a burst — caps how far the
+    /// 0.1s tick can run ahead of the photo pipeline (each in-flight shot
+    /// holds full-resolution bytes).
+    private var inflightBurstCaptures = 0
     private var foregroundObserver: NSObjectProtocol?
     private var pinchBaseZoom: CGFloat?
     private var lastFocusPoint: CGPoint?
@@ -80,11 +91,13 @@ class CameraViewModel: ObservableObject {
     private var dragIsExposure: Bool?
     private var levelHapticFired = false
     private var allClearHapticFired = false
-    private var lastFramingOK = false
-    /// CameraService only tracks one in-flight capture completion at a time
-    /// (see startBurst's comment below); a fast double-tap on the shutter
-    /// would otherwise fire a second capturePhoto before the first's
-    /// completion runs, silently dropping one of the two photos.
+    /// False while REFERENCE mode (or any non-camera surface) is showing —
+    /// motion keeps updating underneath the mode pill, so level / Ready
+    /// haptics must not fire when the user can't see the guides.
+    private var cameraModeActive = false
+    /// Debounces the single-shot path: a fast double-tap on the shutter
+    /// shouldn't queue a second full-quality capture before the first's
+    /// completion runs. Burst bypasses this and overlaps captures on purpose.
     private var isCapturing = false
     private var cancellables = Set<AnyCancellable>()
 
@@ -96,7 +109,6 @@ class CameraViewModel: ObservableObject {
         isLevelVisible = Self.storedDefault(.levelVisible)
         isHeadCircleVisible = Self.storedDefault(.headCircleVisible)
         tipsEnabled = Self.storedDefault(.tipsEnabled)
-        matchSilhouetteEnabled = Self.storedDefault(.matchSilhouetteEnabled)
     }
 
     enum DefaultsKey: String {
@@ -104,7 +116,6 @@ class CameraViewModel: ObservableObject {
         case levelVisible = "frameshift.defaultLevelVisible"
         case headCircleVisible = "frameshift.defaultHeadCircleVisible"
         case tipsEnabled = "frameshift.defaultTipsEnabled"
-        case matchSilhouetteEnabled = "frameshift.defaultMatchSilhouetteEnabled"
     }
 
     private static func storedDefault(_ key: DefaultsKey) -> Bool {
@@ -131,7 +142,6 @@ class CameraViewModel: ObservableObject {
         activeSpec = spec
         applySpec(spec)
         camera.configure()
-        motion.start()
         observeMotion()
         observeCamera()
         observeForeground()
@@ -142,14 +152,29 @@ class CameraViewModel: ObservableObject {
         camera.onVideoFrame = nil
         camera.stop()
         motion.stop()
+        cameraModeActive = false
         focusResetTask?.cancel()
         focusReticleTask?.cancel()
         captureFailureDismissTask?.cancel()
-        silhouetteFadeTask?.cancel()
-        latestPixelBuffer = nil
         stopBurst()
         if let foregroundObserver { NotificationCenter.default.removeObserver(foregroundObserver) }
         cancellables.removeAll()
+    }
+
+    /// REFERENCE · CAMERA pill stays inside CameraView, so onDisappear never
+    /// runs on mode switch — pause CoreMotion + coaching haptics instead.
+    func setCameraModeActive(_ active: Bool) {
+        guard cameraModeActive != active else { return }
+        cameraModeActive = active
+        if active {
+            levelHapticFired = false
+            allClearHapticFired = false
+            motion.start()
+        } else {
+            motion.stop()
+            activeTip = nil
+            activeTipKind = nil
+        }
     }
 
     func updateActiveSpec(_ spec: ShotSpec?) {
@@ -240,6 +265,7 @@ class CameraViewModel: ObservableObject {
         // the mirrored preview (deviceRoll handles the visual-space side).
         motion.targetRoll = physicalRollTarget(for: activeSpec)
         deviceRoll = -deviceRoll
+        devicePitch = -devicePitch   // opposite face — see observeMotion()
         let levels = zoomLevels
         if !levels.contains(zoomFactor) {
             zoomFactor = 1
@@ -256,27 +282,44 @@ class CameraViewModel: ObservableObject {
         camera.capturePhoto(flashMode: flashMode) { [weak self] image in
             DispatchQueue.main.async {
                 self?.isCapturing = false
-                if image == nil { self?.showCaptureFailureNotice() }
+                if image == nil {
+                    self?.showCaptureFailureNotice()
+                } else {
+                    self?.triggerShutterBlink()
+                }
                 completion(image)
             }
         }
     }
 
-    /// Fires continuous captures while the shutter is held, one at a time —
-    /// each shot waits for the previous one to finish before the next is
-    /// requested, since CameraService's capture pipeline only tracks one
-    /// in-flight completion. Stops when stopBurst() cancels the task.
+    /// Fires captures on a fixed 0.1s cadence while the shutter is held — the
+    /// native app's burst rate — overlapping captures instead of waiting for
+    /// each to finish. Flash stays off (it can't recycle at 10 fps) and speed
+    /// prioritization skips Deep Fusion, both matching the native burst.
+    /// Ticks are skipped while the in-flight cap is reached so a slow photo
+    /// pipeline degrades to its real rate instead of queueing unboundedly.
     func startBurst(onPhoto: @escaping (UIImage) -> Void) {
         guard burstTask == nil else { return }
         isBursting = true
+        burstCount = 0
+        inflightBurstCaptures = 0
         burstTask = Task { [weak self] in
             while let self, !Task.isCancelled {
-                let image: UIImage? = await withCheckedContinuation { continuation in
-                    self.capturePhoto { continuation.resume(returning: $0) }
+                // Blink on the tick, not on capture completion — completions
+                // arrive at irregular pipeline timing, which made the flicker
+                // stutter. The tick gives a steady 10 Hz rhythm.
+                self.triggerShutterBlink()
+                if self.inflightBurstCaptures < 3 {
+                    self.inflightBurstCaptures += 1
+                    self.camera.capturePhoto(flashMode: .off, prioritization: .speed) { [weak self] image in
+                        guard let self else { return }
+                        self.inflightBurstCaptures = max(0, self.inflightBurstCaptures - 1)
+                        guard let image else { return }
+                        self.burstCount += 1
+                        onPhoto(image)
+                    }
                 }
-                guard !Task.isCancelled else { return }
-                if let image { onPhoto(image) }
-                try? await Task.sleep(for: .milliseconds(120))
+                try? await Task.sleep(for: .milliseconds(100))
             }
         }
     }
@@ -285,6 +328,18 @@ class CameraViewModel: ObservableObject {
         burstTask?.cancel()
         burstTask = nil
         isBursting = false
+    }
+
+    /// One quick viewfinder blackout; retriggering mid-fade restarts it, so a
+    /// 10 fps burst reads as continuous flicker like the native app.
+    private func triggerShutterBlink() {
+        blinkTask?.cancel()
+        shutterBlinkVisible = true
+        blinkTask = Task {
+            try? await Task.sleep(for: .milliseconds(50))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.08)) { self.shutterBlinkVisible = false }
+        }
     }
 
     private func showCaptureFailureNotice() {
@@ -376,7 +431,6 @@ class CameraViewModel: ObservableObject {
         }
         camera.onVideoFrame = { [weak self] buffer in
             guard let self else { return }
-            self.latestPixelBuffer = buffer
             self.liveAnalyzer.process(pixelBuffer: buffer, isFrontCamera: self.isFrontCamera)
         }
     }
@@ -442,8 +496,13 @@ class CameraViewModel: ObservableObject {
 
         motion.$pitch
             .sink { [weak self] pitch in
-                self?.devicePitch = pitch
-                self?.evaluateCoaching()
+                guard let self else { return }
+                // MotionService's pitch is the rear camera's elevation (the
+                // -z axis). The front camera looks out the opposite face, so
+                // its elevation is the negation — without the flip, selfie
+                // tilt coaching points the wrong way.
+                self.devicePitch = self.isFrontCamera ? -pitch : pitch
+                self.evaluateCoaching()
             }
             .store(in: &cancellables)
 
@@ -452,6 +511,7 @@ class CameraViewModel: ObservableObject {
             .sink { [weak self] isLevel in
                 guard let self else { return }
                 self.isLevel = isLevel
+                guard self.cameraModeActive else { return }
                 if isLevel && !self.levelHapticFired {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     self.levelHapticFired = true
@@ -463,7 +523,7 @@ class CameraViewModel: ObservableObject {
     }
 
     private func evaluateCoaching() {
-        guard let spec = activeSpec else {
+        guard cameraModeActive, let spec = activeSpec else {
             activeTip = nil
             activeTipKind = nil
             return
@@ -493,51 +553,5 @@ class CameraViewModel: ObservableObject {
             allClearHapticFired = false
         }
 
-        if matchSilhouetteEnabled, output.rawFramingGood && !lastFramingOK {
-            triggerMatchSilhouette()
-        }
-        lastFramingOK = output.rawFramingGood
-    }
-
-    // MARK: Match silhouette
-
-    /// Fires once per framing-match event (not continuously) — segmentation
-    /// is too heavy to run every frame. Silently does nothing if the frame
-    /// or the contour extraction isn't available; this is a visual flourish,
-    /// never something capture correctness depends on.
-    private func triggerMatchSilhouette() {
-        guard let buffer = latestPixelBuffer else { return }
-        let isFront = isFrontCamera
-        let contentSize = liveContentSize
-        let vfSize = viewfinderSize
-        Task.detached(priority: .userInitiated) { [silhouetteExtractor] in
-            guard let cgPath = await silhouetteExtractor.extractSilhouette(from: buffer, isFrontCamera: isFront)
-            else { return }
-            await MainActor.run { [weak self] in
-                self?.publishSilhouette(cgPath: cgPath, contentSize: contentSize, viewfinderSize: vfSize)
-            }
-        }
-    }
-
-    private func publishSilhouette(cgPath: CGPath, contentSize: CGSize, viewfinderSize: CGSize) {
-        guard contentSize.width > 0, viewfinderSize.width > 0 else { return }
-        // Vision's contour is normalized (0–1, bottom-left origin) against the
-        // oriented mask; map it the same way liveSubjectInViewfinder() maps
-        // the bounding box — aspect-fill into the viewfinder, then flip Y.
-        let contentRect = ImageContentMapper.contentRect(contentSize: contentSize, in: viewfinderSize, mode: .fill)
-        var transform = CGAffineTransform(
-            a: contentRect.width, b: 0, c: 0, d: -contentRect.height,
-            tx: contentRect.minX, ty: contentRect.minY + contentRect.height
-        )
-        let transformed = cgPath.copy(using: &transform) ?? cgPath
-
-        silhouetteFadeTask?.cancel()
-        matchSilhouettePath = Path(transformed)
-        withAnimation(.easeOut(duration: 0.15)) { silhouetteVisible = true }
-        silhouetteFadeTask = Task {
-            try? await Task.sleep(for: .seconds(0.2))
-            guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.6)) { self.silhouetteVisible = false }
-        }
     }
 }

@@ -13,8 +13,14 @@ class CameraService: NSObject, ObservableObject {
 
     private var videoInput: AVCaptureDeviceInput?
     private var currentPosition: AVCaptureDevice.Position = .back
-    private var captureCompletion: ((UIImage?) -> Void)?
-    private var captureCropRect: CGRect?
+    /// In-flight captures keyed by their AVCapturePhotoSettings uniqueID, so
+    /// burst can overlap captures instead of waiting for each to finish.
+    /// Mutated on sessionQueue only.
+    private struct PendingCapture {
+        let completion: (UIImage?) -> Void
+        let cropRect: CGRect?
+    }
+    private var pendingCaptures: [Int64: PendingCapture] = [:]
     private var displayZoom: CGFloat = 1
     private var subjectAreaObserver: NSObjectProtocol?
     private var interruptionEndedObserver: NSObjectProtocol?
@@ -285,6 +291,7 @@ class CameraService: NSObject, ObservableObject {
 
     func capturePhoto(
         flashMode: AVCaptureDevice.FlashMode = .off,
+        prioritization: AVCapturePhotoOutput.QualityPrioritization = .quality,
         completion: @escaping (UIImage?) -> Void
     ) {
         // Visible preview region in normalized capture coordinates.
@@ -293,8 +300,6 @@ class CameraService: NSObject, ObservableObject {
             $0.metadataOutputRectConverted(fromLayerRect: $0.bounds)
         }
         sessionQueue.async {
-            self.captureCompletion = completion
-            self.captureCropRect = cropRect
             if let connection = self.photoOutput.connection(with: .video),
                connection.isVideoMirroringSupported {
                 connection.automaticallyAdjustsVideoMirroring = false
@@ -314,11 +319,14 @@ class CameraService: NSObject, ObservableObject {
             if self.photoOutput.maxPhotoDimensions.width > 0 {
                 settings.maxPhotoDimensions = self.photoOutput.maxPhotoDimensions
             }
-            settings.photoQualityPrioritization = .quality
+            settings.photoQualityPrioritization = prioritization
             // Front camera reports screen-flash support here on modern iPhones.
             if self.photoOutput.supportedFlashModes.contains(flashMode) {
                 settings.flashMode = flashMode
             }
+            self.pendingCaptures[settings.uniqueID] = PendingCapture(
+                completion: completion, cropRect: cropRect
+            )
             self.photoOutput.capturePhoto(with: settings, delegate: self)
         }
     }
@@ -407,20 +415,17 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
         didFinishProcessingPhoto photo: AVCapturePhoto,
         error: Error?
     ) {
-        let completion = captureCompletion
-        let cropRect = captureCropRect
-        captureCompletion = nil
-        captureCropRect = nil
-        guard
-            error == nil,
-            let data = photo.fileDataRepresentation(),
-            let image = UIImage(data: data)
-        else {
-            DispatchQueue.main.async { completion?(nil) }
-            return
+        let id = photo.resolvedSettings.uniqueID
+        let data = (error == nil) ? photo.fileDataRepresentation() : nil
+        sessionQueue.async {
+            guard let pending = self.pendingCaptures.removeValue(forKey: id) else { return }
+            guard let data, let image = UIImage(data: data) else {
+                DispatchQueue.main.async { pending.completion(nil) }
+                return
+            }
+            let result = Self.cropped(image, toNormalizedRect: pending.cropRect)
+            DispatchQueue.main.async { pending.completion(result) }
         }
-        let result = Self.cropped(image, toNormalizedRect: cropRect)
-        DispatchQueue.main.async { completion?(result) }
     }
 
     /// Crops to the preview-visible region. `rect` is in metadata-output space, which matches

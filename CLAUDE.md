@@ -1,6 +1,6 @@
 # FrameShift — CLAUDE.md
 
-iOS camera app that helps users recreate reference photos in real time. A user imports reference photos (from Photos — typically saved from Pinterest, Instagram, etc.), the app silently analyzes each one to extract a shot spec, and the live camera screen uses that spec to guide framing (head circle, level/tilt, zoom, coaching tips, optional match silhouette).
+iOS camera app that helps users recreate reference photos in real time. A user imports reference photos (from Photos — typically saved from Pinterest, Instagram, etc.), the app silently analyzes each one to extract a shot spec, and the live camera screen uses that spec to guide framing (head circle, level/tilt, zoom, coaching tips, reference ghost overlay).
 
 No backend. No account. Fully on-device. iOS 17+, iPhone-only.
 
@@ -14,7 +14,7 @@ App identity: product/target `FrameShift`, bundle ID `com.anirudhkamath.frameshi
 |---|---|
 | Camera feed | AVFoundation — AVCaptureSession, AVCaptureVideoPreviewLayer |
 | Subject detection on reference | Vision — human/face/pose/horizon batch in `VisionAnalyzer` |
-| Live subject / silhouette | Vision — `LiveVisionAnalyzer`, `LiveSilhouetteExtractor`, `PersonSegmenter` |
+| Live subject / reference cutout | Vision — `LiveVisionAnalyzer`, `PersonSegmenter` |
 | Level / pitch | CoreMotion — `MotionService` (roll + pitch) |
 | Photo import | PhotosUI — `PhotosPicker` |
 | Photo export / save | Photos — PHPhotoLibrary (add-only) |
@@ -47,6 +47,8 @@ struct CapturedPhoto: Identifiable {
     let capturedAt: Date
     let referenceID: UUID?
     var isFavorite: Bool
+    let burstID: UUID?          // shots from one shutter hold share this
+    var isBurstBest: Bool       // user-picked cover of its burst group
 }
 ```
 
@@ -84,7 +86,6 @@ FrameShift/                                 // workspace root
         ├── Services/
         │   ├── VisionAnalyzer.swift        // import-time ShotSpec batch
         │   ├── LiveVisionAnalyzer.swift    // live-frame subject detection
-        │   ├── LiveSilhouetteExtractor.swift
         │   ├── PersonSegmenter.swift       // reference ghost cutout
         │   ├── HeadBoundsEstimator.swift
         │   ├── PitchEstimator.swift
@@ -102,7 +103,7 @@ FrameShift/                                 // workspace root
         │   ├── Onboarding/                 // mandatory first-launch carousel
         │   ├── References/
         │   ├── Camera/                     // viewfinder + overlays + tool drawer
-        │   ├── Library/                    // GalleryPreviewView + CaptureInfoSheet
+        │   ├── Library/                    // GalleryPreviewView, GalleryLibraryView (grid), BurstPickerSheet, CaptureInfoSheet
         │   └── Settings/                   // from References gear only
         ├── PrivacyInfo.xcprivacy
         └── Assets.xcassets
@@ -114,9 +115,9 @@ FrameShift/                                 // workspace root
 
 - `RootTabView` is just `CameraView()` — the camera *is* the app.
 - Mode switching is the bottom **REFERENCE · CAMERA** pill (not a system tab bar).
-- Gallery opens from the bottom-left thumbnail → `GalleryPreviewView` fullScreenCover.
+- Gallery opens from the bottom-left thumbnail → `GalleryPreviewView` fullScreenCover; its top-right grid button opens the full `GalleryLibraryView` grid.
 - Settings opens from the References toolbar gear only — not from the camera chrome.
-- Camera `⋯` drawer toggles guides for the current session (LEVEL / GRID / CIRCLE / TIPS / MATCH); defaults live in Settings.
+- Camera `⋯` drawer toggles guides for the current session (LEVEL / GRID / CIRCLE / TIPS); defaults live in Settings. It also holds the aspect picker: 4:3 "POSTS" / 16:9 "STORIES" (session-only, no Settings default).
 
 ---
 
@@ -127,10 +128,15 @@ FrameShift/                                 // workspace root
 - Multi-lens display zoom (back ~0.5×–6×; front 1×–3×)
 - Tap-to-focus + vertical drag exposure bias (`FocusReticle`)
 - Flash / screen flash, front/back flip
-- Hold-to-burst on shutter
+- Hold-to-burst on shutter: 0.1s cadence with overlapping `.speed` captures
+  (flash off), per-shot viewfinder blink, live count inside the shutter button
+- Bursts share a `burstID` and appear as one gallery item; the burst badge
+  opens `BurstPickerSheet` (pick best = cover, or "Keep Only This Photo")
 - Captures cropped to the visible preview region
+- Aspect modes from the tool drawer: 4:3 (full sensor, feed posts) and 16:9
+  (9:16 story crop) — the viewfinder box ratio drives the capture crop
 
-Live coaching (when an active reference has a `ShotSpec`): head circle (`SubjectPlacementGuide`), tilt/pitch + level (`TiltPitchGuide` / `LevelIndicator`), tip banner, zoom recommendation, optional match silhouette. `BoundingBoxOverlay` exists but is unused — head circle replaced the static body box in the live UI.
+Live coaching (when an active reference has a `ShotSpec`): head circle (`SubjectPlacementGuide`), tilt/pitch + level (`TiltPitchGuide` / `LevelIndicator`), tip banner, zoom recommendation. The green "match" scan sweep (`MatchSilhouetteOverlay` / `LiveSilhouetteExtractor`) was removed — coaching signals are the guides + Ready pill + haptics only. `BoundingBoxOverlay` exists but is unused — head circle replaced the static body box in the live UI.
 
 ---
 
@@ -204,7 +210,8 @@ Import uses the system photo picker (no broad library read). Saving uses add-onl
 | Settings menu (defaults, storage, permissions, privacy, replay onboarding) | `Screens/Settings/`, entry from References gear |
 | Zoom pills, flash, front camera, burst, exposure drag | `CameraService` + `CameraView` |
 | Camera tool drawer (session guide toggles) | `CameraToolDrawer` |
-| Live subject coaching / match silhouette (beyond static box) | `LiveVisionAnalyzer`, `CompositionCoach`, `MatchSilhouetteOverlay` |
+| Burst count in shutter while holding (exception to "no photo counter") | `ShutterButton` |
+| Live subject coaching (beyond static box) | `LiveVisionAnalyzer`, `CompositionCoach` — the green match-scan flourish was later removed |
 | Post-shot recommendations screen | **Not shipped** — before/after export card was gallery-only, then its button was removed as redundant with share (`ExportService` is dormant) |
 
 Deferred (explicitly post-v1): accounts / paid features — see `accounts-paid-features-prd.md`.

@@ -11,6 +11,11 @@ struct CameraView: View {
     @StateObject private var referencesVM = ReferencesViewModel()
 
     @State private var showReferenceGhost = false
+    // Hold on the top-left reference thumb: full reference, opaque, in the
+    // ghost's placement until the finger lifts. The task is the pending
+    // hold-threshold timer; cancelled when the finger lifts early (= tap).
+    @State private var showReferencePeek = false
+    @State private var peekArmTask: Task<Void, Never>?
     @State private var galleryStart: CapturedPhoto?
     @State private var referencePicks: [PhotosPickerItem] = []
     @Namespace private var modePillNamespace
@@ -25,8 +30,12 @@ struct CameraView: View {
             .background(Color.black)
             .onAppear {
                 vm.onAppear(spec: activeSpec)
+                vm.setCameraModeActive(isCameraMode)
             }
             .onDisappear { vm.onDisappear() }
+            .onChange(of: appState.selectedTab) { _, _ in
+                vm.setCameraModeActive(isCameraMode)
+            }
             .onChange(of: appState.activeReferenceIndex) { _ in
                 vm.updateActiveSpec(activeSpec)
             }
@@ -73,10 +82,13 @@ struct CameraView: View {
 
                     Spacer(minLength: 0)
 
-                    // 4:3 letterboxed viewfinder, like the native Camera app: the full
-                    // sensor frame is visible, so the saved photo matches the preview.
+                    // Letterboxed viewfinder, like the native Camera app. At 4:3 the
+                    // full sensor frame is visible; 16:9 shows (and captures) the
+                    // story-shaped center crop. Either way the saved photo matches
+                    // the preview, since captures crop to the visible region.
                     viewfinderBox
-                        .aspectRatio(3.0 / 4.0, contentMode: .fit)
+                        .aspectRatio(vm.captureAspect.previewRatio, contentMode: .fit)
+                        .animation(.easeInOut(duration: 0.25), value: vm.captureAspect)
 
                     Spacer(minLength: 0)
                 } else {
@@ -251,23 +263,45 @@ struct CameraView: View {
                             .onEnded { _ in vm.handleExposureDragEnded() }
                     )
 
-                if showReferenceGhost, let ref = appState.activeReference {
+                // Shutter blink: the feed blacks out for an instant per
+                // captured frame (guides above stay steady), like the native app.
+                Color.black
+                    .opacity(vm.shutterBlinkVisible ? 1 : 0)
+                    .allowsHitTesting(false)
+
+                if let ref = appState.activeReference {
                     let contentSize = activeSpec?.referenceSize ?? ref.image.size
                     let fitRect = ImageContentMapper.contentRect(
                         contentSize: contentSize,
                         in: geo.size,
                         mode: .fit
                     )
-                    // Person-only cutout when segmentation succeeded; the
-                    // transparent background lets it run brighter than the
-                    // full-frame fallback without hiding the live scene.
-                    Image(uiImage: ref.personCutout ?? ref.image)
-                        .resizable()
-                        .frame(width: fitRect.width, height: fitRect.height)
-                        .position(x: fitRect.midX, y: fitRect.midY)
-                        .opacity(ref.personCutout != nil ? 0.5 : 0.35)
-                        .allowsHitTesting(false)
-                        .transition(.opacity)
+
+                    if showReferenceGhost {
+                        // Person-only cutout when segmentation succeeded; the
+                        // transparent background lets it run brighter than the
+                        // full-frame fallback without hiding the live scene.
+                        Image(uiImage: ref.personCutout ?? ref.image)
+                            .resizable()
+                            .frame(width: fitRect.width, height: fitRect.height)
+                            .position(x: fitRect.midX, y: fitRect.midY)
+                            .opacity(ref.personCutout != nil ? 0.5 : 0.35)
+                            .allowsHitTesting(false)
+                            .transition(.opacity)
+                    }
+
+                    // Hold-to-peek: the whole reference, opaque, in exactly
+                    // the ghost's placement — same fitRect, so the cutout
+                    // fades into the photo without shifting, and framing
+                    // against either means the same thing.
+                    if showReferencePeek {
+                        Image(uiImage: ref.image)
+                            .resizable()
+                            .frame(width: fitRect.width, height: fitRect.height)
+                            .position(x: fitRect.midX, y: fitRect.midY)
+                            .allowsHitTesting(false)
+                            .transition(.opacity)
+                    }
                 }
 
                 if vm.isGridVisible {
@@ -312,8 +346,6 @@ struct CameraView: View {
                     .id("\(point.x),\(point.y)")
                     .transition(.opacity)
                 }
-
-                MatchSilhouetteOverlay(path: vm.matchSilhouettePath, isVisible: vm.silhouetteVisible)
         }
     }
 
@@ -399,30 +431,57 @@ struct CameraView: View {
     }
 
     /// Reference thumbnail + eye — always visible when a reference is active.
+    /// Tap toggles the persistent ghost cutout; press and hold peeks the full
+    /// reference (opaque, ghost placement) until the finger lifts. One manual
+    /// press gesture instead of Button/TapGesture + LongPressGesture: composed
+    /// recognizers made the tap unreliable — the exclusive long-press keeps
+    /// the tap suppressed while it's still "possible".
     private var referencePeekButton: some View {
         Group {
             if let ref = appState.activeReference {
-                Button {
-                    withAnimation(.easeOut(duration: 0.2)) { showReferenceGhost.toggle() }
-                } label: {
-                    ZStack(alignment: .bottomTrailing) {
-                        Image(uiImage: ref.image)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: 40, height: 40)
-                            .clipShape(Circle())
-                            .overlay(Circle().stroke(.white.opacity(0.35), lineWidth: 1))
+                ZStack(alignment: .bottomTrailing) {
+                    Image(uiImage: ref.image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 40, height: 40)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(.white.opacity(0.35), lineWidth: 1))
 
-                        Image(systemName: showReferenceGhost ? "eye.fill" : "eye")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(4)
-                            .background(.black.opacity(0.55), in: Circle())
-                            .offset(x: 4, y: 4)
-                    }
+                    Image(systemName: showReferenceGhost ? "eye.fill" : "eye")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(4)
+                        .background(.black.opacity(0.55), in: Circle())
+                        .offset(x: 4, y: 4)
                 }
+                .contentShape(Circle())
+                .gesture(referenceThumbPressGesture)
             }
         }
+    }
+
+    /// Press decides on release: lift before the arm delay → tap (toggle the
+    /// ghost); held past it → the armed peek was showing, so just drop it.
+    private var referenceThumbPressGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { _ in
+                guard peekArmTask == nil, !showReferencePeek else { return }
+                peekArmTask = Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(250))
+                    guard !Task.isCancelled else { return }
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    withAnimation(.easeIn(duration: 0.12)) { showReferencePeek = true }
+                }
+            }
+            .onEnded { _ in
+                peekArmTask?.cancel()
+                peekArmTask = nil
+                if showReferencePeek {
+                    withAnimation(.easeOut(duration: 0.15)) { showReferencePeek = false }
+                } else {
+                    withAnimation(.easeOut(duration: 0.2)) { showReferenceGhost.toggle() }
+                }
+            }
     }
 
     // MARK: Zoom controls (overlaid on the viewfinder, Apple-style)
@@ -495,6 +554,7 @@ struct CameraView: View {
                 if isCameraMode && vm.cameraAuthorizationState != .denied {
                     ShutterButton(
                         isBursting: vm.isBursting,
+                        burstCount: vm.burstCount,
                         onTap: { capture() },
                         onHoldStart: { startBurst() },
                         onHoldEnd: { vm.stopBurst() }
@@ -634,10 +694,24 @@ struct CameraView: View {
     /// Holding the shutter fires continuous captures (like the native Camera
     /// app's burst) until the finger lifts. The reference is frozen at the
     /// start of the hold so a mid-burst reference switch can't split results.
+    /// Every shot in the hold shares one burstID, so the gallery shows the
+    /// whole burst as a single stack.
     private func startBurst() {
         let referenceAtCapture = appState.activeReference
+        let burstID = UUID()
         vm.startBurst { image in
-            appState.addCapturedShot(image, referenceID: referenceAtCapture?.id)
+            // Downsample off the main actor — at burst rate the display-size
+            // render of each full capture would otherwise stall the viewfinder.
+            let maxSize = UIImage.displayMaxPixelSize
+            Task.detached(priority: .userInitiated) {
+                let display = image.downsampled(maxPixelSize: maxSize)
+                await MainActor.run {
+                    appState.insertCapturedShot(
+                        display: display, full: image,
+                        referenceID: referenceAtCapture?.id, burstID: burstID
+                    )
+                }
+            }
         }
     }
 

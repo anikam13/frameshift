@@ -14,7 +14,7 @@ struct HowToSheet: View {
                     step(
                         icon: "photo.badge.plus",
                         title: "Add references",
-                        text: "Import photos you want to recreate — saved Pinterest or Instagram shots work great. FrameShift analyzes each one's framing, tilt, and lens on-device."
+                        text: "Upload a photo you want to recreate. FrameShift analyzes framing, tilt, and lens on-device."
                     )
                     step(
                         icon: "camera.viewfinder",
@@ -28,8 +28,8 @@ struct HowToSheet: View {
                     )
                     step(
                         icon: "photo.on.rectangle.angled",
-                        title: "Review and share",
-                        text: "Open the bottom-left thumbnail to browse shots: favorite with the heart, apply Disposable / Film / Digital looks with the wand, and export a before-and-after card with the sliders."
+                        title: "Gallery",
+                        text: "Open the bottom-left thumbnail to like with the heart, share, or try filters with the wand."
                     )
                 }
 

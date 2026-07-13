@@ -1,20 +1,20 @@
 import SwiftUI
-import PhotosUI
 
 /// Reference photos the user wants to recreate. Imported from the photo
-/// library (v2: shared Instagram / Pinterest links) and grouped by detected
-/// style. Tapping a reference makes it active and jumps to the camera.
+/// library and grouped by detected style. Tapping a reference makes it
+/// active and jumps to the camera.
 struct ReferencesView: View {
     @EnvironmentObject var appState: AppState
-    @StateObject private var vm = ReferencesViewModel()
-    @State private var picks: [PhotosPickerItem] = []
     @State private var showSettings = false
     @State private var showHowTo = false
 
-    // Long-press multi-select for batch delete.
+    // Multi-select for batch delete, entered from the Select toolbar button.
     @State private var isSelecting = false
     @State private var selectedIDs: Set<UUID> = []
     @State private var confirmDeleteSelection = false
+
+    // Long-press on a cell full-screens that reference.
+    @State private var fullscreenPhoto: ReferencePhoto?
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 3), count: 3)
 
@@ -83,16 +83,15 @@ struct ReferencesView: View {
                 Button("Cancel", role: .cancel) {}
             }
         }
-        .onChange(of: picks) { _, items in
-            vm.importPhotos(items: items, into: appState)
-            picks = []
-        }
         .sheet(isPresented: $showSettings) {
             SettingsView()
                 .environmentObject(appState)
         }
         .sheet(isPresented: $showHowTo) {
             HowToSheet()
+        }
+        .fullScreenCover(item: $fullscreenPhoto) { photo in
+            ReferenceFullscreenView(photo: photo)
         }
         .onAppear {
             #if DEBUG
@@ -125,32 +124,35 @@ struct ReferencesView: View {
 
     // MARK: Empty state
 
+    /// No in-empty-state Add Photos button: the shutter-position + picker in
+    /// CameraView's bottom chrome is the single import control in REFERENCE mode.
     private var emptyState: some View {
         VStack(spacing: 14) {
             Image(systemName: "photo.stack")
                 .font(.system(size: 44, weight: .thin))
                 .foregroundStyle(.secondary)
 
-            Text("Recreate a shot you love")
+            Text("Upload a photo")
                 .font(.title3.weight(.semibold))
 
-            Text("Save a photo from Pinterest or Instagram — FrameShift shows you exactly how to frame it.")
+            // Manual break after "framing" — the natural wrap lands after
+            // "to", leaving a short orphan second line.
+            Text("FrameShift analyzes the framing\nand guides you to recreate it.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
-            PhotosPicker(selection: $picks, maxSelectionCount: 10, matching: .images) {
-                Text("Add Photos")
-                    .font(.system(size: 16, weight: .semibold))
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 11)
-                    .background(Color.accentColor, in: Capsule())
-                    .foregroundStyle(.white)
-            }
-            .padding(.top, 4)
+            Text("Tap + below to add a reference.")
+                .font(.footnote)
+                .foregroundStyle(.tertiary)
+                .padding(.top, 2)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
+        // The camera chrome overlays the bottom of this view (its safe-area
+        // inset doesn't propagate through the NavigationStack — see the grid's
+        // contentMargins note), so center within the visible region above it.
+        .padding(.bottom, CameraView.bottomChromeHeight)
     }
 
     // MARK: Grouped grid
@@ -243,20 +245,50 @@ struct ReferencesView: View {
                                 appState.selectedTab = .camera
                             }
                         }
-                        // Long-press enters selection mode (replaces the old
-                        // context-menu Remove — batch delete covers it).
+                        // Long-press full-screens the reference (selection
+                        // mode moved to the toolbar's Select button).
                         .onLongPressGesture {
                             guard !isSelecting else { return }
                             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                isSelecting = true
-                                selectedIDs = [photo.id]
-                            }
+                            fullscreenPhoto = photo
                         }
                 }
             }
             .padding(.horizontal, 16)
         }
+    }
+}
+
+// MARK: - ReferenceFullscreenView
+
+/// Long-press viewer: the whole reference, aspect-fit on black — no crop,
+/// no chrome beyond a close button. Tap anywhere to dismiss.
+private struct ReferenceFullscreenView: View {
+    let photo: ReferencePhoto
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            Image(uiImage: photo.image)
+                .resizable()
+                .scaledToFit()
+        }
+        .overlay(alignment: .topLeading) {
+            Button { dismiss() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 42, height: 42)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 6)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { dismiss() }
+        .preferredColorScheme(.dark)
     }
 }
 
