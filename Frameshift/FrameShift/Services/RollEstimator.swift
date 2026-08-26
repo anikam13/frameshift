@@ -8,14 +8,16 @@ import CoreGraphics
 /// T1 (EXIF gravity vector) is preferred: it's present on any original
 /// iPhone capture regardless of scene content. T2 (VNDetectHorizonRequest)
 /// only succeeds when the photo has a visible sky/ground horizon line, which
-/// most portrait references — the common case — don't have, so it's a
-/// fallback rather than the primary source.
-enum RollEstimator {
+/// most portrait references — the common case — don't have. Horizon is
+/// stored for diagnostics / pitch helpers but is never high-trust enough
+/// for Tilted grouping or hard roll coaching (screenshots / web crops).
+/// nonisolated: import-time only, called from VisionAnalyzer off MainActor.
+nonisolated enum RollEstimator {
 
     enum Tier: String {
-        case exifAttitude      // T1
-        case horizonDetection  // T2
-        case none               // T3 — no signal, coach against level
+        case exifAttitude      // T1 — only tier that trusts roll for UI
+        case horizonDetection  // T2 — low trust; omit roll coaching
+        case none               // T3 — no signal; omit roll coaching
     }
 
     struct Estimate {

@@ -2,18 +2,35 @@ import Vision
 import CoreVideo
 import ImageIO
 
-/// Runs live human detection on camera frames (~1 fps).
-final class LiveVisionAnalyzer {
+/// Runs live human detection + body pose on camera frames (~3 fps).
+/// nonisolated: frame callbacks arrive on the capture video queue; Vision
+/// work stays off MainActor (project default isolation is MainActor).
+nonisolated final class LiveVisionAnalyzer {
+
+    /// One live frame's subject, normalized UIKit coordinates in oriented
+    /// buffer space.
+    struct Subject {
+        /// Full-body bounding box; nil when no human was detected.
+        var box: CGRect?
+        /// Head-guide center computed with HeadBoundsEstimator's pose tier —
+        /// the same convention the reference circle was built with, so
+        /// comparing the two carries no systematic offset. nil when body
+        /// pose failed (subject too small / mostly out of frame).
+        var headCenter: CGPoint?
+        /// Pose shoulders; nil when pose failed or a joint was occluded.
+        var leftShoulder: CGPoint?
+        var rightShoulder: CGPoint?
+
+        var isEmpty: Bool { box == nil && headCenter == nil }
+    }
 
     private var lastProcessed = Date.distantPast
-    private let interval: TimeInterval = 1.0
+    /// ~3 fps: fast enough that framing feedback tracks a moving subject;
+    /// rectangles + pose at this cadence stay a rounding error next to the
+    /// preview pipeline itself.
+    private let interval: TimeInterval = 0.35
 
-    private(set) var liveSubject: CGRect?
-    private(set) var lightingScore: Double = 0.5
-    /// Oriented buffer dimensions Vision uses (matches preview aspect-fill mapping).
-    private(set) var contentSize: CGSize = .zero
-
-    var onUpdate: ((CGRect?, Double, CGSize) -> Void)?
+    var onUpdate: ((Subject, Double, CGSize) -> Void)?
 
     func process(pixelBuffer: CVPixelBuffer, isFrontCamera: Bool) {
         let now = Date()
@@ -29,8 +46,9 @@ final class LiveVisionAnalyzer {
             orientation: orientation
         )
 
-        let request = VNDetectHumanRectanglesRequest()
-        request.upperBodyOnly = false
+        let rectsRequest = VNDetectHumanRectanglesRequest()
+        rectsRequest.upperBodyOnly = false
+        let poseRequest = VNDetectHumanBodyPoseRequest()
 
         let handler = VNImageRequestHandler(
             cvPixelBuffer: pixelBuffer,
@@ -38,30 +56,62 @@ final class LiveVisionAnalyzer {
             options: [:]
         )
 
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        // Utility: live pose must not outrank AVCaptureSession / restore analysis.
+        DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self else { return }
             do {
-                try handler.perform([request])
+                try handler.perform([rectsRequest, poseRequest])
             } catch {
-                self.publish(subject: nil, lighting: 0.4, contentSize: orientedSize)
+                self.publish(subject: Subject(), lighting: 0.4, contentSize: orientedSize)
                 return
             }
 
-            guard let obs = request.results?.first else {
-                self.publish(subject: nil, lighting: 0.4, contentSize: orientedSize)
-                return
+            var subject = Subject()
+            if let obs = rectsRequest.results?.first {
+                let box = obs.boundingBox
+                subject.box = CGRect(
+                    x: box.minX,
+                    y: 1.0 - box.maxY,
+                    width: box.width,
+                    height: box.height
+                )
+            }
+            if let pose = poseRequest.results?.first {
+                subject.leftShoulder = Self.uiKitPoint(pose, .leftShoulder)
+                subject.rightShoulder = Self.uiKitPoint(pose, .rightShoulder)
+                // Head center needs at least nose + neck, mirroring the
+                // reference-side estimator's pose-tier requirements.
+                if let nose = Self.uiKitPoint(pose, .nose),
+                   let neck = Self.uiKitPoint(pose, .neck) {
+                    let head = HeadBoundsEstimator.estimate(
+                        faceRect: nil,
+                        landmarks: nil,
+                        pose: HeadBoundsEstimator.PoseInput(
+                            nose: nose,
+                            neck: neck,
+                            leftEye: Self.uiKitPoint(pose, .leftEye),
+                            rightEye: Self.uiKitPoint(pose, .rightEye)
+                        ),
+                        upperBody: subject.box ?? CGRect(x: 0, y: 0, width: 1, height: 1),
+                        imageSize: orientedSize
+                    )
+                    subject.headCenter = CGPoint(x: head.centerX, y: head.centerY)
+                }
             }
 
-            let box = obs.boundingBox
-            let uiRect = CGRect(
-                x: box.minX,
-                y: 1.0 - box.maxY,
-                width: box.width,
-                height: box.height
-            )
-            let lighting = self.estimateLighting(buffer: pixelBuffer, subject: uiRect)
-            self.publish(subject: uiRect, lighting: lighting, contentSize: orientedSize)
+            let lighting = subject.box.map {
+                self.estimateLighting(buffer: pixelBuffer, subject: $0)
+            } ?? 0.4
+            self.publish(subject: subject, lighting: lighting, contentSize: orientedSize)
         }
+    }
+
+    private static func uiKitPoint(
+        _ pose: VNHumanBodyPoseObservation,
+        _ joint: VNHumanBodyPoseObservation.JointName
+    ) -> CGPoint? {
+        guard let p = try? pose.recognizedPoint(joint), p.confidence > 0.25 else { return nil }
+        return CGPoint(x: p.location.x, y: 1.0 - p.location.y)
     }
 
     // MARK: - Private
@@ -79,10 +129,7 @@ final class LiveVisionAnalyzer {
         }
     }
 
-    private func publish(subject: CGRect?, lighting: Double, contentSize: CGSize) {
-        liveSubject = subject
-        lightingScore = lighting
-        self.contentSize = contentSize
+    private func publish(subject: Subject, lighting: Double, contentSize: CGSize) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.onUpdate?(subject, lighting, contentSize)

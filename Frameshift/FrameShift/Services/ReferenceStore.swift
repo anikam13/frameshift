@@ -1,8 +1,8 @@
 import UIKit
 
-/// Persists imported reference images and their ordering to Application
-/// Support so references survive relaunch. ShotSpecs are never serialized —
-/// they are recomputed by VisionAnalyzer on load (see ShotSpec.swift).
+/// Persists imported reference images, cached ShotSpecs / analysisFailed,
+/// and display-sized person cutouts so cold launch skips Vision when
+/// `ShotSpec.analyzerVersion` still matches.
 /// nonisolated: the project defaults to MainActor isolation, but this
 /// store's file I/O runs on background tasks.
 nonisolated struct ReferenceStore {
@@ -11,6 +11,53 @@ nonisolated struct ReferenceStore {
         struct Entry: Codable {
             let id: UUID
             let importedAt: Date
+            /// `ShotSpec.analyzerVersion` at the time of analysis. Missing or
+            /// mismatched → reanalyze once on restore.
+            var analyzerVersion: Int?
+            var analysisFailed: Bool?
+            var spec: ShotSpec?
+
+            private enum CodingKeys: String, CodingKey {
+                case id, importedAt, analyzerVersion, analysisFailed, spec
+            }
+
+            init(
+                id: UUID,
+                importedAt: Date,
+                analyzerVersion: Int? = nil,
+                analysisFailed: Bool? = nil,
+                spec: ShotSpec? = nil
+            ) {
+                self.id = id
+                self.importedAt = importedAt
+                self.analyzerVersion = analyzerVersion
+                self.analysisFailed = analysisFailed
+                self.spec = spec
+            }
+
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                id = try c.decode(UUID.self, forKey: .id)
+                importedAt = try c.decode(Date.self, forKey: .importedAt)
+                analyzerVersion = try c.decodeIfPresent(Int.self, forKey: .analyzerVersion)
+                analysisFailed = try c.decodeIfPresent(Bool.self, forKey: .analysisFailed)
+                // A single stale/partial ShotSpec must not fail the whole
+                // library decode (that used to wipe references from memory).
+                if c.contains(.spec), try c.decodeNil(forKey: .spec) == false {
+                    spec = try? c.decode(ShotSpec.self, forKey: .spec)
+                } else {
+                    spec = nil
+                }
+            }
+
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(id, forKey: .id)
+                try c.encode(importedAt, forKey: .importedAt)
+                try c.encodeIfPresent(analyzerVersion, forKey: .analyzerVersion)
+                try c.encodeIfPresent(analysisFailed, forKey: .analysisFailed)
+                try c.encodeIfPresent(spec, forKey: .spec)
+            }
         }
         var activeReferenceID: UUID?
         var references: [Entry]   // index 0 = newest, matches AppState order
@@ -21,6 +68,12 @@ nonisolated struct ReferenceStore {
         let importedAt: Date
         /// Display-sized decode for AppState / UI. Full bytes stay on disk.
         let image: UIImage
+        let spec: ShotSpec?
+        let analysisFailed: Bool
+        /// True when cached analysis is missing or version-stale.
+        let needsAnalysis: Bool
+        /// Cutout PNG exists on disk — load via `loadCutout` when needed.
+        let hasCutoutOnDisk: Bool
     }
 
     private let directory: URL
@@ -43,13 +96,30 @@ nonisolated struct ReferenceStore {
         directory.appendingPathComponent("\(id.uuidString).img")
     }
 
+    /// Display-sized PNG with alpha for the camera ghost overlay.
+    private func cutoutURL(for id: UUID) -> URL {
+        directory.appendingPathComponent("\(id.uuidString).cutout.png")
+    }
+
     @discardableResult
     func saveImageData(_ data: Data, id: UUID) -> Bool {
         (try? data.write(to: imageURL(for: id), options: .atomic)) != nil
     }
 
+    @discardableResult
+    func saveCutout(_ image: UIImage, id: UUID) -> Bool {
+        guard let data = image.pngData() else { return false }
+        return (try? data.write(to: cutoutURL(for: id), options: .atomic)) != nil
+    }
+
+    func deleteCutout(id: UUID) {
+        try? FileManager.default.removeItem(at: cutoutURL(for: id))
+    }
+
+    /// Removes original bytes, cutout, and leaves the caller to rewrite the manifest.
     func deleteImage(id: UUID) {
         try? FileManager.default.removeItem(at: imageURL(for: id))
+        deleteCutout(id: id)
     }
 
     @discardableResult
@@ -60,16 +130,17 @@ nonisolated struct ReferenceStore {
         return (try? data.write(to: manifestURL, options: .atomic)) != nil
     }
 
-    /// Reads the manifest and image files. Entries whose image file is
-    /// missing or unreadable are dropped. Call off the main thread.
-    /// Images are ImageIO-downsampled for display; full bytes stay on disk
-    /// and are loaded via `loadFullImage` for Vision re-analysis.
+    /// Reads the manifest, display images, and cached specs. Cutouts are not
+    /// decoded here — call `loadCutout` for the active ghost overlay only.
+    /// Entries whose image file is missing or unreadable are dropped.
+    /// Call off the main thread.
     func loadAll() -> (references: [RestoredReference], activeID: UUID?) {
         guard let data = try? Data(contentsOf: manifestURL) else { return ([], nil) }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         guard let manifest = try? decoder.decode(Manifest.self, from: data) else { return ([], nil) }
 
+        let currentVersion = ShotSpec.analyzerVersion
         let references = manifest.references.compactMap { entry -> RestoredReference? in
             guard let imageData = try? Data(contentsOf: imageURL(for: entry.id)) else { return nil }
             let image = UIImage.downsampled(
@@ -77,13 +148,36 @@ nonisolated struct ReferenceStore {
                 maxPixelSize: UIImage.displayMaxPixelSize
             ) ?? UIImage(data: imageData)?.upright()
             guard let image else { return nil }
+
+            // Version mismatch or resilient-decode nil → drop cached spec.
+            let versionOK = entry.analyzerVersion == currentVersion
+            let failed = versionOK && (entry.analysisFailed == true)
+            let spec = versionOK && !failed ? entry.spec : nil
+            // Terminal states: usable spec, or recorded analysisFailed.
+            let needsAnalysis = !failed && spec == nil
+
+            let hasCutout = FileManager.default.fileExists(atPath: cutoutURL(for: entry.id).path)
+
             return RestoredReference(
                 id: entry.id,
                 importedAt: entry.importedAt,
-                image: image
+                image: image,
+                spec: spec,
+                analysisFailed: failed,
+                needsAnalysis: needsAnalysis,
+                hasCutoutOnDisk: hasCutout && !needsAnalysis && !failed
             )
         }
         return (references, manifest.activeReferenceID)
+    }
+
+    /// Display-sized ghost cutout for one reference. Call off the main thread.
+    func loadCutout(id: UUID) -> UIImage? {
+        guard let cutoutData = try? Data(contentsOf: cutoutURL(for: id)) else { return nil }
+        return UIImage.downsampled(
+            data: cutoutData,
+            maxPixelSize: UIImage.overlayMaxPixelSize
+        ) ?? UIImage(data: cutoutData)
     }
 
     /// Full-resolution upright decode for one-shot Vision / cutout work.

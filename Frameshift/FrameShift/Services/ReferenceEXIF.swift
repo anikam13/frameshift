@@ -3,7 +3,8 @@ import ImageIO
 
 /// EXIF metadata parsed once per reference import (US-105).
 /// All fields are optional — Pinterest/screenshot crops carry no EXIF.
-struct ReferenceEXIF {
+/// nonisolated: called from VisionAnalyzer off the main actor.
+nonisolated struct ReferenceEXIF {
 
     /// 35mm-equivalent focal length, when derivable.
     let focalLength35mm: CGFloat?

@@ -4,6 +4,7 @@ import SwiftUI
 /// Back chevron + date pill up top, swipeable photo, filmstrip, and the
 /// share · heart · info · filters toolbar. A burst appears as one item —
 /// its best pick is the cover, and the burst badge opens a picker to choose.
+/// Tap toggles chrome (Photos-style); pinch / double-tap zoom the image.
 struct GalleryPreviewView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
@@ -14,6 +15,7 @@ struct GalleryPreviewView: View {
     @State private var showBurstPicker = false
     @State private var showLibrary = false
     @State private var filterTarget: CapturedPhoto?
+    @State private var chromeVisible = true
 
     private var shots: [CapturedPhoto] { appState.capturedShots }
 
@@ -28,31 +30,23 @@ struct GalleryPreviewView: View {
 
             TabView(selection: $selectedID) {
                 ForEach(items) { item in
-                    Image(uiImage: item.cover.image)
-                        .resizable()
-                        .scaledToFit()
-                        .tag(item.id)
+                    ZoomableGalleryPage(image: item.cover.image) {
+                        withAnimation(.easeInOut(duration: 0.22)) {
+                            chromeVisible.toggle()
+                        }
+                    }
+                    .tag(item.id)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
+            .ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                topBar
-                    .padding(.horizontal, 14)
-                    .padding(.top, 6)
-                if let item = currentItem, item.isBurst {
-                    burstBadge(item)
-                        .padding(.top, 10)
-                }
-                Spacer()
-                filmstrip
-                    .padding(.bottom, 14)
-                bottomBar
-                    .padding(.horizontal, 18)
-                    .padding(.bottom, 6)
-            }
+            chromeOverlay
+                .opacity(chromeVisible ? 1 : 0)
+                .allowsHitTesting(chromeVisible)
         }
         .preferredColorScheme(.dark)
+        .statusBarHidden(!chromeVisible)
         .onAppear {
             // Callers pass a shot id; if that shot is inside a burst, the
             // pager's pages are keyed by the burst's id instead.
@@ -86,6 +80,24 @@ struct GalleryPreviewView: View {
                 withAnimation(.easeOut(duration: 0.2)) { selectedID = newID }
             }
             .environmentObject(appState)
+        }
+    }
+
+    private var chromeOverlay: some View {
+        VStack(spacing: 0) {
+            topBar
+                .padding(.horizontal, 14)
+                .padding(.top, 6)
+            if let item = currentItem, item.isBurst {
+                burstBadge(item)
+                    .padding(.top, 10)
+            }
+            Spacer()
+            filmstrip
+                .padding(.bottom, 14)
+            bottomBar
+                .padding(.horizontal, 18)
+                .padding(.bottom, 6)
         }
     }
 
@@ -313,5 +325,199 @@ struct GalleryPreviewView: View {
             appState.removeCapturedShot(id: item.shots[0].id)
         }
         if itemsBefore.count <= 1 { dismiss() }
+    }
+}
+
+// MARK: - Zoomable page
+
+/// Photos-style pinch / pan / double-tap via UIScrollView. Zoom state lives
+/// entirely in UIKit so pan ticks never re-render gallery chrome. At 1×,
+/// scrolling is disabled so TabView can page horizontally.
+private struct ZoomableGalleryPage: View {
+    let image: UIImage
+    var onSingleTap: () -> Void
+    @State private var bridge = ZoomableScrollBridge()
+
+    var body: some View {
+        ZoomableScrollView(image: image, onSingleTap: onSingleTap, bridge: bridge)
+            .onDisappear {
+                bridge.view?.resetZoom(animated: false)
+            }
+    }
+}
+
+private final class ZoomableScrollBridge {
+    weak var view: ZoomableScrollUIView?
+}
+
+private struct ZoomableScrollView: UIViewRepresentable {
+    let image: UIImage
+    var onSingleTap: () -> Void
+    let bridge: ZoomableScrollBridge
+
+    func makeUIView(context: Context) -> ZoomableScrollUIView {
+        let view = ZoomableScrollUIView()
+        view.onSingleTap = onSingleTap
+        view.setImage(image)
+        bridge.view = view
+        return view
+    }
+
+    func updateUIView(_ uiView: ZoomableScrollUIView, context: Context) {
+        uiView.onSingleTap = onSingleTap
+        uiView.setImage(image)
+        bridge.view = uiView
+    }
+}
+
+/// UIScrollView zoom host — same interaction model as the system Photos viewer.
+private final class ZoomableScrollUIView: UIScrollView, UIScrollViewDelegate {
+    var onSingleTap: (() -> Void)?
+
+    private let imageView = UIImageView()
+    private var currentImage: UIImage?
+    private var lastLayoutSize: CGSize = .zero
+
+    private let maxZoom: CGFloat = 4
+    private let doubleTapZoom: CGFloat = 2.5
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        delegate = self
+        showsHorizontalScrollIndicator = false
+        showsVerticalScrollIndicator = false
+        bouncesZoom = true
+        decelerationRate = .fast
+        contentInsetAdjustmentBehavior = .never
+        backgroundColor = .clear
+        // At 1×, leave horizontal swipes to the parent TabView page gesture.
+        isScrollEnabled = false
+
+        imageView.contentMode = .scaleAspectFit
+        imageView.isUserInteractionEnabled = true
+        addSubview(imageView)
+
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        addGestureRecognizer(doubleTap)
+
+        let singleTap = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap))
+        singleTap.numberOfTapsRequired = 1
+        singleTap.require(toFail: doubleTap)
+        addGestureRecognizer(singleTap)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func setImage(_ image: UIImage) {
+        guard currentImage !== image else { return }
+        currentImage = image
+        imageView.image = image
+        lastLayoutSize = .zero
+        setNeedsLayout()
+    }
+
+    func resetZoom(animated: Bool) {
+        guard zoomScale != minimumZoomScale || contentOffset != .zero else {
+            isScrollEnabled = false
+            return
+        }
+        setZoomScale(minimumZoomScale, animated: animated)
+        isScrollEnabled = false
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard bounds.size.width > 0, bounds.size.height > 0 else { return }
+        if bounds.size != lastLayoutSize {
+            lastLayoutSize = bounds.size
+            configureForCurrentImage()
+        }
+        centerImage()
+    }
+
+    private func configureForCurrentImage() {
+        guard let image = imageView.image else { return }
+        let imageSize = image.size
+        guard imageSize.width > 0, imageSize.height > 0 else { return }
+
+        // Fitted size at scale 1 — aspect-fit inside the page.
+        let fit = min(bounds.width / imageSize.width, bounds.height / imageSize.height)
+        let fitted = CGSize(width: imageSize.width * fit, height: imageSize.height * fit)
+
+        zoomScale = 1
+        minimumZoomScale = 1
+        maximumZoomScale = maxZoom
+        imageView.frame = CGRect(origin: .zero, size: fitted)
+        contentSize = fitted
+        contentOffset = .zero
+        isScrollEnabled = false
+        centerImage()
+    }
+
+    private func centerImage() {
+        let boundsSize = bounds.size
+        var frame = imageView.frame
+
+        frame.origin.x = frame.size.width < boundsSize.width
+            ? (boundsSize.width - frame.size.width) / 2
+            : 0
+        frame.origin.y = frame.size.height < boundsSize.height
+            ? (boundsSize.height - frame.size.height) / 2
+            : 0
+
+        imageView.frame = frame
+    }
+
+    // MARK: UIScrollViewDelegate
+
+    func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+        imageView
+    }
+
+    func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        centerImage()
+        isScrollEnabled = zoomScale > minimumZoomScale + 0.01
+    }
+
+    func scrollViewDidEndZooming(
+        _ scrollView: UIScrollView,
+        with view: UIView?,
+        atScale scale: CGFloat
+    ) {
+        if scale <= minimumZoomScale + 0.05 {
+            setZoomScale(minimumZoomScale, animated: true)
+            isScrollEnabled = false
+        }
+    }
+
+    // MARK: Taps
+
+    @objc private func handleSingleTap() {
+        onSingleTap?()
+    }
+
+    @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+        if zoomScale > minimumZoomScale + 0.01 {
+            setZoomScale(minimumZoomScale, animated: true)
+            isScrollEnabled = false
+            return
+        }
+
+        let point = gesture.location(in: imageView)
+        let size = bounds.size
+        let width = size.width / doubleTapZoom
+        let height = size.height / doubleTapZoom
+        let rect = CGRect(
+            x: point.x - width / 2,
+            y: point.y - height / 2,
+            width: width,
+            height: height
+        )
+        zoom(to: rect, animated: true)
+        isScrollEnabled = true
     }
 }

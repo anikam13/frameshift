@@ -31,15 +31,22 @@ struct CameraView: View {
             .onAppear {
                 vm.onAppear(spec: activeSpec)
                 vm.setCameraModeActive(isCameraMode)
+                vm.setLiveVisionSuspended(appState.isBackgroundVisionBusy)
             }
             .onDisappear { vm.onDisappear() }
             .onChange(of: appState.selectedTab) { _, _ in
                 vm.setCameraModeActive(isCameraMode)
             }
-            .onChange(of: appState.activeReferenceIndex) { _ in
-                vm.updateActiveSpec(activeSpec)
+            .onChange(of: appState.isBackgroundVisionBusy) { _, busy in
+                vm.setLiveVisionSuspended(busy)
             }
-            .onChange(of: appState.activeReference?.spec) { _ in
+            .onChange(of: appState.activeReferenceIndex) { _, _ in
+                vm.updateActiveSpec(activeSpec)
+                if let id = appState.activeReference?.id {
+                    appState.ensureCutoutLoaded(for: id)
+                }
+            }
+            .onChange(of: appState.activeReference?.spec) { _, _ in
                 vm.updateActiveSpec(activeSpec)
             }
             .onChange(of: referencePicks) { _, items in
@@ -142,7 +149,7 @@ struct CameraView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .overlay(alignment: .bottom) {
+        .overlay(alignment: .bottomLeading) {
             if showReferenceHint {
                 referenceHint
             }
@@ -188,10 +195,18 @@ struct CameraView: View {
     // MARK: First-launch hint
 
     private var showReferenceHint: Bool {
-        isCameraMode && !appState.hasReferences && !hasSeenReferenceHint
+        // Wait for restore — before it finishes `hasReferences` is falsely
+        // empty, and a full-width hint overlay was swallowing REFERENCE taps
+        // for the whole cold-start decode window.
+        isCameraMode
+            && appState.hasFinishedRestoringReferences
+            && !appState.hasReferences
+            && !hasSeenReferenceHint
     }
 
     private var referenceHint: some View {
+        // Intrinsic size only (bottomLeading overlay). A maxWidth frame here
+        // used to cover the mode pill and swallow REFERENCE taps on cold start.
         VStack(spacing: 4) {
             Text("Add a reference photo to get framing guides")
                 .font(.system(size: 13, weight: .medium))
@@ -204,9 +219,9 @@ struct CameraView: View {
                 .font(.system(size: 10))
                 .foregroundColor(.white)
         }
+        .fixedSize()
         .onTapGesture { hasSeenReferenceHint = true }
         .padding(.bottom, 92)
-        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.leading, 40)
         .transition(.opacity)
     }
@@ -310,14 +325,16 @@ struct CameraView: View {
                         .animation(.easeOut(duration: 0.2), value: vm.isFocused)
                 }
 
-                if activeSpec != nil && vm.isLevelVisible {
+                if let spec = activeSpec, vm.isLevelVisible,
+                   spec.hasTrustedPitch || spec.hasTrustedRoll {
                     TiltPitchGuide(
                         roll: vm.deviceRoll,
                         pitch: vm.devicePitch,
-                        targetRoll: activeSpec?.coachRollTarget ?? 0,
-                        targetPitch: activeSpec?.targetPitch ?? 0,
+                        targetRoll: spec.coachRollTarget,
+                        targetPitch: spec.targetPitch ?? 0,
                         isLevel: vm.isLevel,
-                        showPitch: activeSpec?.hasTrustedPitch ?? true
+                        showPitch: spec.hasTrustedPitch,
+                        showRoll: spec.hasTrustedRoll
                     )
                     .opacity(combinedGuideOpacity)
                     .animation(.easeOut(duration: 0.2), value: vm.isFocused)
@@ -370,12 +387,21 @@ struct CameraView: View {
         let p = vm.compositionProgress
         switch kind {
         case .lighting:    return p.lightingOK
-        case .zoom:        return p.zoomOK
         case .tilt:        return p.tiltOK
         case .distance:    return p.framingOK
         case .horizontal:  return p.framingOK
+        case .vertical:    return p.framingOK
         case .level:       return p.levelOK
         }
+    }
+
+    /// Live match readout in 5% steps (steadier than raw), capped below 100
+    /// so the latched "Ready" is the only thing that ever reads as complete.
+    private var matchPercent: Int? {
+        guard activeSpec != nil else { return nil }
+        let score = vm.compositionProgress.matchScore
+        guard score > 0 else { return nil }
+        return min(Int((score * 20).rounded()) * 5, 95)
     }
 
     // MARK: Top bar
@@ -398,6 +424,17 @@ struct CameraView: View {
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
                             .background(.ultraThinMaterial, in: Capsule())
+                    } else if let percent = matchPercent {
+                        // Progressive readout while composing — same slot the
+                        // Ready pill takes over once everything latches.
+                        Text("\(percent)%")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .contentTransition(.numericText())
+                            .animation(.easeOut(duration: 0.2), value: percent)
                     }
 
                     controlPill
@@ -565,19 +602,23 @@ struct CameraView: View {
             }
             .frame(height: 74)
 
-            HStack {
-                libraryThumbnail
-                Spacer()
-                flipButton
-                    .opacity(isCameraMode && vm.cameraAuthorizationState != .denied ? 1 : 0)
-                    .disabled(!isCameraMode || vm.cameraAuthorizationState == .denied)
+            ZStack {
+                HStack {
+                    libraryThumbnail
+                    Spacer()
+                    flipButton
+                        .opacity(isCameraMode && vm.cameraAuthorizationState != .denied ? 1 : 0)
+                        .disabled(!isCameraMode || vm.cameraAuthorizationState == .denied)
+                        .allowsHitTesting(isCameraMode && vm.cameraAuthorizationState != .denied)
+                }
+                modePill
             }
-            .overlay { modePill }
             .padding(.horizontal, 22)
         }
         .padding(.top, 14)
         .padding(.bottom, 6)
         .opacity(vm.isDrawerOpen && isCameraMode ? 0 : 1)
+        .allowsHitTesting(!(vm.isDrawerOpen && isCameraMode))
     }
 
     /// Shutter-shaped photo picker in reference mode: ring + plus. Dark fill
@@ -706,7 +747,7 @@ struct CameraView: View {
             Task.detached(priority: .userInitiated) {
                 let display = image.downsampled(maxPixelSize: maxSize)
                 await MainActor.run {
-                    appState.insertCapturedShot(
+                    _ = appState.insertCapturedShot(
                         display: display, full: image,
                         referenceID: referenceAtCapture?.id, burstID: burstID
                     )

@@ -2,7 +2,9 @@ import Vision
 import UIKit
 import ImageIO
 
-struct VisionAnalyzer {
+/// nonisolated: Vision batch must never hop to MainActor (project default
+/// isolation is MainActor; analysis runs on VisionWorkQueue / detached tasks).
+nonisolated struct VisionAnalyzer {
 
     /// Analyze a reference photo and return a ShotSpec. Background thread only.
     /// The image must already be upright (`UIImage.upright()`); all stored
@@ -79,6 +81,13 @@ struct VisionAnalyzer {
         let roll = RollEstimator.estimate(exif: exif, horizonObservation: horizonObs)
         let targetRoll = roll.roll
         let rollConfidence = roll.confidence
+        let rollSource: ShotSpec.RollSource = {
+            switch roll.tier {
+            case .exifAttitude:     return .exifAttitude
+            case .horizonDetection: return .horizonDetection
+            case .none:             return .none
+            }
+        }()
 
         let pitch = PitchEstimator.estimate(
             exif: exif,
@@ -109,6 +118,7 @@ struct VisionAnalyzer {
             targetPitch: pitch.pitch,
             pitchConfidence: pitch.confidence,
             rollConfidence: rollConfidence,
+            rollSource: rollSource,
             recommendedZoom: recommendedZoom,
             referenceSize: CGSize(width: image.size.width, height: image.size.height)
         )
@@ -273,6 +283,10 @@ struct VisionAnalyzer {
 
     /// EXIF focal is the strongest signal; face fill is more robust than body
     /// fill for cropped web references (FR-11); body fill is the last resort.
+    /// The fill heuristics never recommend 0.5×: a small face/body can mean an
+    /// ultra-wide lens *or* a distant subject (full-body framing at a normal
+    /// lens), and the two are indistinguishable without focal metadata — which
+    /// most web references have stripped. 1× is the safe guess.
     private func inferZoom(exif: ReferenceEXIF, subjectBox: NormBox, faceBox: NormBox?) -> CGFloat {
         if let focal = exif.focalLength35mm {
             switch focal {
@@ -284,14 +298,12 @@ struct VisionAnalyzer {
         }
         if let faceBox {
             switch faceBox.height {
-            case ..<0.08: return 0.5
             case ..<0.15: return 1
             case ..<0.28: return 2
             default:      return 3
             }
         }
         switch subjectBox.height {
-        case ..<0.32: return 0.5
         case ..<0.48: return 1
         case ..<0.72: return 2
         default:      return 3
@@ -299,7 +311,7 @@ struct VisionAnalyzer {
     }
 }
 
-private extension CGImagePropertyOrientation {
+private nonisolated extension CGImagePropertyOrientation {
     init(_ orientation: UIImage.Orientation) {
         switch orientation {
         case .up:            self = .up

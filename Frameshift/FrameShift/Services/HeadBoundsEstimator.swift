@@ -6,7 +6,8 @@ import CoreGraphics
 /// Output center is normalized to image width/height; radius is normalized to
 /// min(imageWidth, imageHeight) so it survives uniform aspect-fit mapping
 /// (see `ShotSpec.headCircle(in:)`).
-enum HeadBoundsEstimator {
+/// nonisolated: used by VisionAnalyzer / LiveVisionAnalyzer off MainActor.
+nonisolated enum HeadBoundsEstimator {
 
     // MARK: - Tunable constants
 

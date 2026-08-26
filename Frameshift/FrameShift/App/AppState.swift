@@ -1,6 +1,14 @@
 import SwiftUI
 import Combine
 
+/// Serializes Vision / person-segmentation so restore, imports, and the
+/// sample pack never stampede the Neural Engine against the camera.
+private actor VisionWorkQueue {
+    func run(_ body: @Sendable () async -> Void) async {
+        await body()
+    }
+}
+
 @MainActor
 class AppState: ObservableObject {
 
@@ -19,15 +27,30 @@ class AppState: ObservableObject {
     // Camera is the default mode; the REFERENCE · CAMERA pill switches this.
     @Published var selectedTab: Tab = .camera
 
+    /// True while import/restore Vision work is in flight. Camera pauses live
+    /// subject detection against this so preview isn't starved.
+    @Published private(set) var isBackgroundVisionBusy = false
+
+    /// Becomes true after the first `restoreReferences()` finishes (even when
+    /// the library is empty). UI that keys off `hasReferences` must wait on
+    /// this so cold start doesn't flash the empty-state hint over the mode pill.
+    @Published private(set) var hasFinishedRestoringReferences = false
+
     private let store = ReferenceStore()
     private let analyzer = VisionAnalyzer()
     private let segmenter = PersonSegmenter()
     private let capturedStore = CapturedStore()
     private let filterPresetStore = FilterPresetStore()
+    private let visionQueue = VisionWorkQueue()
+    private var pendingVisionJobs = 0
 
     // Photos add-only permission denied notice — shown once per app launch.
     @Published var photoLibraryDeniedNoticeVisible = false
     private var hasShownPhotoLibraryDeniedNotice = false
+
+    /// Restore finished during first-launch onboarding — analyze after the
+    /// user reaches the camera so Next taps aren't fighting Neural Engine.
+    private var deferredRestoreAnalysis: (active: UUID, rest: [UUID])?
 
     // General-purpose ephemeral notice (Photos save failed, local save
     // failed, etc.) — shown every time since each is a distinct failure,
@@ -56,6 +79,43 @@ class AppState: ObservableObject {
         persistManifest()
     }
 
+    /// Shared import path for PhotosPicker and sample pack.
+    /// Shows the photo immediately, persists original bytes, then analyzes off-main.
+    func importReference(raw: UIImage, data: Data) {
+        let imageData = data
+        // Decode/downsample off the main actor — sample pack / multi-import
+        // used to upright full-res bitmaps synchronously and freeze UI.
+        Task.detached(priority: .utility) { [analyzer, segmenter, store] in
+            let full = raw.upright()
+            let display = full.downsampled(maxPixelSize: UIImage.displayMaxPixelSize)
+            let photoId = await MainActor.run {
+                let photo = ReferencePhoto(image: display)
+                self.addReference(photo, imageData: imageData)
+                return photo.id
+            }
+            await self.performVisionWork {
+                let spec = await analyzer.analyze(image: full, imageData: imageData)
+                if let spec {
+                    let cutout = await segmenter.cutout(from: full)
+                    let displayCutout = cutout?.downsampled(maxPixelSize: UIImage.overlayMaxPixelSize)
+                    if let displayCutout {
+                        _ = store.saveCutout(displayCutout, id: photoId)
+                    } else {
+                        store.deleteCutout(id: photoId)
+                    }
+                    await MainActor.run {
+                        self.applyAnalysis(for: photoId, spec: spec, cutout: displayCutout, failed: false)
+                    }
+                } else {
+                    store.deleteCutout(id: photoId)
+                    await MainActor.run {
+                        self.applyAnalysis(for: photoId, spec: nil, cutout: nil, failed: true)
+                    }
+                }
+            }
+        }
+    }
+
     func removeReference(id: UUID) {
         references.removeAll { $0.id == id }
         activeReferenceIndex = max(0, min(activeReferenceIndex, references.count - 1))
@@ -69,20 +129,52 @@ class AppState: ObservableObject {
         if let index = references.firstIndex(where: { $0.id == id }) {
             activeReferenceIndex = index
             persistManifest()
+            ensureCutoutLoaded(for: id)
         }
     }
 
-    /// Reloads persisted references on launch and recomputes their specs.
-    /// Display images are downsampled; Vision/cutout use a one-shot full decode.
+    /// Loads a persisted ghost cutout on demand (active ref / ghost overlay).
+    func ensureCutoutLoaded(for id: UUID) {
+        guard let index = references.firstIndex(where: { $0.id == id }) else { return }
+        guard references[index].personCutout == nil,
+              references[index].spec != nil,
+              !references[index].analysisFailed
+        else { return }
+        Task.detached(priority: .utility) { [store] in
+            let cutout = store.loadCutout(id: id)
+            guard let cutout else { return }
+            await MainActor.run {
+                guard let idx = self.references.firstIndex(where: { $0.id == id }),
+                      self.references[idx].personCutout == nil
+                else { return }
+                self.references[idx].personCutout = cutout
+            }
+        }
+    }
+
+    /// Reloads persisted references on launch. Cached specs with a matching
+    /// `ShotSpec.analyzerVersion` skip Vision; cutouts load lazily for the
+    /// active reference only so cold start doesn't decode dozens of PNGs.
     func restoreReferences() async {
+        defer { hasFinishedRestoringReferences = true }
         guard references.isEmpty else { return }
-        let restored = await Task.detached(priority: .userInitiated) { [store] in
+        // Utility: thumb decode must not outrank camera session startup.
+        let restored = await Task.detached(priority: .utility) { [store] in
             store.loadAll()
         }.value
         guard !restored.references.isEmpty else { return }
 
+        // Publish display images + specs first — no cutouts — so the mode pill
+        // and references grid become usable immediately.
         references = restored.references.map {
-            ReferencePhoto(id: $0.id, image: $0.image, importedAt: $0.importedAt)
+            ReferencePhoto(
+                id: $0.id,
+                image: $0.image,
+                importedAt: $0.importedAt,
+                spec: $0.spec,
+                personCutout: nil,
+                analysisFailed: $0.analysisFailed
+            )
         }
         if let activeID = restored.activeID,
            let index = references.firstIndex(where: { $0.id == activeID }) {
@@ -91,60 +183,157 @@ class AppState: ObservableObject {
             activeReferenceIndex = 0
         }
 
+        let activeID = references[activeReferenceIndex].id
+        // Ghost overlay only needs the active cutout on camera entry.
+        if restored.references.contains(where: { $0.id == activeID && $0.hasCutoutOnDisk }) {
+            ensureCutoutLoaded(for: activeID)
+        }
+
+        let needingIDs = restored.references.filter(\.needsAnalysis).map(\.id)
+        guard !needingIDs.isEmpty else { return }
+
+        let ordered = needingIDs.contains(activeID)
+            ? [activeID] + needingIDs.filter { $0 != activeID }
+            : needingIDs
+        let rest = Array(ordered.dropFirst())
+        let first = ordered[0]
+
+        // First-launch onboarding still mounts this restore task — hold Vision
+        // until the user finishes so Next isn't fighting Neural Engine.
+        let onboardingDone = UserDefaults.standard.bool(
+            forKey: "frameshift.hasCompletedOnboarding"
+        )
+        if onboardingDone {
+            scheduleRestoreAnalysis(activeID: first, queuedIDs: rest, yieldForCamera: true)
+        } else {
+            deferredRestoreAnalysis = (first, rest)
+        }
+    }
+
+    /// Called when first-launch onboarding completes (or is already done).
+    func resumeDeferredAnalysisAfterOnboarding() {
+        guard let deferred = deferredRestoreAnalysis else { return }
+        deferredRestoreAnalysis = nil
+        scheduleRestoreAnalysis(
+            activeID: deferred.active,
+            queuedIDs: deferred.rest,
+            yieldForCamera: true
+        )
+    }
+
+    private func scheduleRestoreAnalysis(
+        activeID: UUID,
+        queuedIDs: [UUID],
+        yieldForCamera: Bool
+    ) {
+        let imageStore = store
+        let visionAnalyzer = analyzer
+        let personSegmenter = segmenter
         // One reference's analysis pass: full-res decode (not retained in
-        // AppState), Vision spec, then the ghost cutout.
-        let analyzeOne: @Sendable (UUID) async -> Void = { [store, analyzer, segmenter] id in
-            guard let full = store.loadFullImage(id: id) else {
-                await MainActor.run { self.markAnalysisFailed(for: id) }
+        // AppState), Vision spec, then the ghost cutout — then persist.
+        let analyzeOne: @Sendable (UUID) async -> Void = { id in
+            guard let full = imageStore.loadFullImage(id: id) else {
+                imageStore.deleteCutout(id: id)
+                await MainActor.run {
+                    self.applyAnalysis(for: id, spec: nil, cutout: nil, failed: true)
+                }
                 return
             }
-            guard let spec = await analyzer.analyze(image: full.image, imageData: full.data)
+            guard let spec = await visionAnalyzer.analyze(image: full.image, imageData: full.data)
             else {
-                await MainActor.run { self.markAnalysisFailed(for: id) }
+                imageStore.deleteCutout(id: id)
+                await MainActor.run {
+                    self.applyAnalysis(for: id, spec: nil, cutout: nil, failed: true)
+                }
                 return
             }
-            await MainActor.run { self.updateSpec(for: id, spec: spec) }
-            if let cutout = await segmenter.cutout(from: full.image) {
-                let displayCutout = cutout.downsampled(maxPixelSize: UIImage.overlayMaxPixelSize)
-                await MainActor.run { self.updateCutout(for: id, cutout: displayCutout) }
+            // Balanced is enough for the ghost overlay and much cheaper at migrate.
+            let cutout = await personSegmenter.cutout(from: full.image, quality: .balanced)
+            let displayCutout = cutout?.downsampled(maxPixelSize: UIImage.overlayMaxPixelSize)
+            if let displayCutout {
+                _ = imageStore.saveCutout(displayCutout, id: id)
+            } else {
+                imageStore.deleteCutout(id: id)
+            }
+            await MainActor.run {
+                self.applyAnalysis(for: id, spec: spec, cutout: displayCutout, failed: false)
             }
         }
 
-        // Launch-speed rule: never fan out one Vision pass per reference at
-        // launch — a parallel stampede of pose/face/segmentation models
-        // starves the camera session and first render. The active reference
-        // (the one live coaching needs) analyzes right away; the rest run
-        // one at a time at utility, yielding to camera and UI work.
-        let activeID = references[activeReferenceIndex].id
-        let queuedIDs = restored.references.map(\.id).filter { $0 != activeID }
-        Task.detached(priority: .userInitiated) {
-            await analyzeOne(activeID)
-            Task.detached(priority: .utility) {
-                for id in queuedIDs { await analyzeOne(id) }
+        Task(priority: .utility) {
+            await performVisionWork {
+                // Let AVCaptureSession.startRunning claim the first beat.
+                if yieldForCamera {
+                    try? await Task.sleep(for: .milliseconds(800))
+                }
+                await analyzeOne(activeID)
+                for id in queuedIDs {
+                    await analyzeOne(id)
+                }
             }
         }
     }
 
+    /// Runs Vision work one job at a time and publishes busy state for the camera.
+    private func performVisionWork(_ body: @escaping @Sendable () async -> Void) async {
+        pendingVisionJobs += 1
+        isBackgroundVisionBusy = true
+        await visionQueue.run(body)
+        pendingVisionJobs = max(0, pendingVisionJobs - 1)
+        if pendingVisionJobs == 0 {
+            isBackgroundVisionBusy = false
+        }
+    }
+
+    /// Sync on MainActor: the JSON is tiny, and detached writes raced so an
+    /// earlier "no spec yet" snapshot could overwrite a completed analysis.
     private func persistManifest() {
-        store.saveManifest(ReferenceStore.Manifest(
+        _ = store.saveManifest(ReferenceStore.Manifest(
             activeReferenceID: activeReference?.id,
-            references: references.map { .init(id: $0.id, importedAt: $0.importedAt) }
+            references: references.map { photo in
+                .init(
+                    id: photo.id,
+                    importedAt: photo.importedAt,
+                    analyzerVersion: (photo.spec != nil || photo.analysisFailed)
+                        ? ShotSpec.analyzerVersion : nil,
+                    analysisFailed: photo.analysisFailed ? true : nil,
+                    spec: photo.spec
+                )
+            }
         ))
     }
 
-    func updateSpec(for id: UUID, spec: ShotSpec) {
+    /// Applies analysis results to memory and rewrites the manifest (spec/failed).
+    private func applyAnalysis(
+        for id: UUID,
+        spec: ShotSpec?,
+        cutout: UIImage?,
+        failed: Bool
+    ) {
         guard let index = references.firstIndex(where: { $0.id == id }) else { return }
         references[index].spec = spec
+        references[index].analysisFailed = failed
+        references[index].personCutout = failed ? nil : cutout
+        persistManifest()
+    }
+
+    func updateSpec(for id: UUID, spec: ShotSpec) {
+        applyAnalysis(for: id, spec: spec, cutout: references.first { $0.id == id }?.personCutout, failed: false)
     }
 
     func updateCutout(for id: UUID, cutout: UIImage) {
         guard let index = references.firstIndex(where: { $0.id == id }) else { return }
         references[index].personCutout = cutout
+        Task.detached(priority: .utility) { [store] in
+            _ = store.saveCutout(cutout, id: id)
+        }
     }
 
     func markAnalysisFailed(for id: UUID) {
-        guard let index = references.firstIndex(where: { $0.id == id }) else { return }
-        references[index].analysisFailed = true
+        applyAnalysis(for: id, spec: nil, cutout: nil, failed: true)
+        Task.detached(priority: .utility) { [store] in
+            store.deleteCutout(id: id)
+        }
     }
 
     /// References grouped by detected style (tilt, camera angle, pose, lens,
@@ -180,12 +369,31 @@ class AppState: ObservableObject {
 
     // MARK: Captured shots
 
-    @discardableResult
-    func addCapturedShot(_ image: UIImage, referenceID: UUID?, burstID: UUID? = nil) -> UUID {
-        // Keep a display-sized bitmap in memory; write the capture-quality
-        // JPEG to disk (and Photos) from the full image on a background task.
-        let display = image.downsampled(maxPixelSize: UIImage.displayMaxPixelSize)
-        return insertCapturedShot(display: display, full: image, referenceID: referenceID, burstID: burstID)
+    /// Single-shot path: downsamples off-main so a full-res capture (or filter
+    /// save) never freezes the viewfinder / gallery on insert.
+    func addCapturedShot(_ image: UIImage, referenceID: UUID?, burstID: UUID? = nil) {
+        let maxSize = UIImage.displayMaxPixelSize
+        Task.detached(priority: .userInitiated) {
+            let display = image.downsampled(maxPixelSize: maxSize)
+            await MainActor.run {
+                _ = self.insertCapturedShot(
+                    display: display, full: image,
+                    referenceID: referenceID, burstID: burstID
+                )
+            }
+        }
+    }
+
+    /// Like `addCapturedShot` but returns the new id after the insert lands.
+    func addCapturedShotAsync(_ image: UIImage, referenceID: UUID?, burstID: UUID? = nil) async -> UUID {
+        let maxSize = UIImage.displayMaxPixelSize
+        let display = await Task.detached(priority: .userInitiated) {
+            image.downsampled(maxPixelSize: maxSize)
+        }.value
+        return insertCapturedShot(
+            display: display, full: image,
+            referenceID: referenceID, burstID: burstID
+        )
     }
 
     /// Burst-path variant: the caller downsamples off the main actor first —
@@ -321,14 +529,17 @@ class AppState: ObservableObject {
     }
 
     private func persistCapturedManifest() {
-        capturedStore.saveManifest(CapturedStore.Manifest(
+        let manifest = CapturedStore.Manifest(
             shots: capturedShots.map {
                 .init(
                     id: $0.id, capturedAt: $0.capturedAt, referenceID: $0.referenceID,
                     isFavorite: $0.isFavorite, burstID: $0.burstID, isBurstBest: $0.isBurstBest
                 )
             }
-        ))
+        )
+        Task.detached(priority: .utility) { [capturedStore] in
+            _ = capturedStore.saveManifest(manifest)
+        }
     }
 
     #if DEBUG
@@ -347,6 +558,7 @@ class AppState: ObservableObject {
             return photo
         }
         selectedTab = .references
+        hasFinishedRestoringReferences = true
     }
     #endif
 

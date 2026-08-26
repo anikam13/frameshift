@@ -29,15 +29,15 @@ Do not use third-party dependencies. All required frameworks ship with iOS 17.
 
 ## Data Models
 
-`ShotSpec` (see `Models/ShotSpec.swift`) is the central object: subject/placement boxes, pose landmarks, head guide, target roll/pitch + confidence, recommended zoom, framing style, reference size. Specs are computed on import (and again on restore), kept in memory only — never serialized.
+`ShotSpec` (see `Models/ShotSpec.swift`) is the central object: subject/placement boxes, pose landmarks, head guide, target roll/pitch + confidence, recommended zoom, framing style, reference size. Specs are computed on import and **persisted** in `ReferenceStore` with `ShotSpec.analyzerVersion`. Cold launch loads cached specs/cutouts and **skips Vision** when the stored version matches; bump `analyzerVersion` to invalidate (reanalyze once, then save).
 
 ```swift
 struct ReferencePhoto: Identifiable {
     let id: UUID
     let image: UIImage          // display-sized; full bytes stay on disk
-    var spec: ShotSpec?
-    var personCutout: UIImage?  // ghost overlay; memory only
-    var analysisFailed: Bool    // no person/face found
+    var spec: ShotSpec?         // persisted in references.json when analyzed
+    var personCutout: UIImage?  // display-sized in RAM; PNG on disk
+    var analysisFailed: Bool    // persisted with analyzerVersion
     let importedAt: Date
 }
 
@@ -52,7 +52,7 @@ struct CapturedPhoto: Identifiable {
 }
 ```
 
-Persistence: `ReferenceStore` keeps original import bytes + JSON manifest; `CapturedStore` keeps JPEG + manifest (favorites, referenceID). On launch, stores decode **downsampled** images into `AppState` (`UIImage+Downsample`). Full-resolution decode is only for Vision analysis and export.
+Persistence: `ReferenceStore` keeps original import bytes + JSON manifest (per-entry `analyzerVersion`, `spec`, `analysisFailed`) + `{id}.cutout.png`; `CapturedStore` keeps JPEG + manifest (favorites, referenceID). On launch, stores decode **downsampled** images into `AppState` (`UIImage+Downsample`). Full-resolution decode is only for Vision analysis (import / version-mismatch migrate) and export.
 
 ---
 
@@ -94,6 +94,7 @@ FrameShift/                                 // workspace root
         │   ├── CompositionCoach.swift      // tips + CompositionProgress
         │   ├── CameraService.swift         // session, zoom, flash, front, capture crop
         │   ├── MotionService.swift
+        │   ├── SampleReferencePack.swift   // bundled starter refs (Pexels; provenance inside)
         │   ├── ReferenceStore.swift
         │   ├── CapturedStore.swift
         │   ├── PhotoLibrarySaver.swift     // add-only Photos writes
@@ -142,10 +143,21 @@ Live coaching (when an active reference has a `ShotSpec`): head circle (`Subject
 
 ## Key Flows
 
-### Import → analyze
-1. `PhotosPicker` → `ReferencesViewModel.importPhotos` / camera REFERENCE-mode picker
+### Import → analyze → persist
+1. `PhotosPicker` / sample pack → `AppState.importReference`
 2. Photo appears immediately; `VisionAnalyzer.analyze` runs off main actor
-3. Spec + person cutout update `AppState`; failures set `analysisFailed`
+3. Spec + person cutout update `AppState` and `ReferenceStore` (`analyzerVersion`,
+   JSON spec / `analysisFailed`, `{id}.cutout.png`); failures set `analysisFailed`
+
+### Cold launch restore
+1. `ReferenceStore.loadAll` decodes display images + cached specs/cutouts
+2. Matching `ShotSpec.analyzerVersion` → **no Vision**; coaching ready immediately
+3. Missing / stale version (or pre-persistence manifests) → serial reanalyze
+   (active first, yield for camera, then persist) — same queue as imports
+
+Cold start empty state: "Try sample references" runs 6 bundled Pexels photos
+(`Assets.xcassets/SampleRef*`, provenance in `Services/SampleReferencePack.swift`)
+through the import pipeline. Fully offline; the no-network rule holds.
 
 ### Capture → persist
 1. `CameraService.capturePhoto` → cropped `UIImage`
@@ -222,7 +234,7 @@ Deferred (explicitly post-v1): accounts / paid features — see `accounts-paid-f
 
 - Never keep a library of full-resolution `UIImage`s in `@Published` arrays for the app lifetime.
 - Restore and in-memory gallery/reference images use `UIImage.downsampled` (ImageIO thumbnails).
-- Full-resolution decode only for: Vision analysis (temporary), person cutout (then downsample for ghost), and export card generation (load from store by id).
+- Full-resolution decode only for: Vision analysis on import / analyzerVersion migrate (temporary), person cutout (then downsample + persist PNG), and export card generation (load from store by id).
 - Burst makes this non-negotiable — a held shutter can create dozens of shots quickly.
 
 ---

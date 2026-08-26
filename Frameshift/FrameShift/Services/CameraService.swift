@@ -20,7 +20,9 @@ class CameraService: NSObject, ObservableObject {
         let completion: (UIImage?) -> Void
         let cropRect: CGRect?
     }
-    private var pendingCaptures: [Int64: PendingCapture] = [:]
+    /// nonisolated(unsafe): guarded by sessionQueue, not the main actor —
+    /// the photo delegate callback reads it off-main.
+    nonisolated(unsafe) private var pendingCaptures: [Int64: PendingCapture] = [:]
     private var displayZoom: CGFloat = 1
     private var subjectAreaObserver: NSObjectProtocol?
     private var interruptionEndedObserver: NSObjectProtocol?
@@ -409,7 +411,9 @@ extension CameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
 
 // MARK: - Photo capture
 
-extension CameraService: AVCapturePhotoCaptureDelegate {
+/// nonisolated: AVFoundation invokes this delegate on its own queue; the
+/// body hops to sessionQueue / main itself.
+nonisolated extension CameraService: AVCapturePhotoCaptureDelegate {
     func photoOutput(
         _ output: AVCapturePhotoOutput,
         didFinishProcessingPhoto photo: AVCapturePhoto,

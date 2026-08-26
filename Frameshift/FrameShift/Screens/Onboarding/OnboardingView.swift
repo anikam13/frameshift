@@ -12,6 +12,9 @@ struct OnboardingView: View {
     @AppStorage("frameshift.hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @Environment(\.dismiss) private var dismiss
     @State private var page = 0
+    /// Blocks stacked Next taps — TabView page changes plus withAnimation
+    /// were racing and freezing the carousel on double-tap.
+    @State private var isAdvancing = false
 
     private let pageCount = 4
 
@@ -22,17 +25,36 @@ struct OnboardingView: View {
             VStack(spacing: 0) {
                 TabView(selection: $page) {
                     OnboardingWelcomePage().tag(0)
-                    OnboardingReferencesPage().tag(1)
-                    OnboardingCameraPage().tag(2)
+                    // Prefetch only the adjacent image page so cold start
+                    // doesn't decode every onboarding asset up front.
+                    Group {
+                        if page >= 1 {
+                            OnboardingReferencesPage()
+                        } else {
+                            Color.clear
+                        }
+                    }
+                    .tag(1)
+                    Group {
+                        if page >= 2 {
+                            OnboardingCameraPage()
+                        } else {
+                            Color.clear
+                        }
+                    }
+                    .tag(2)
                     OnboardingComparePage().tag(3)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
+                .disabled(isAdvancing)
 
                 dots
                     .padding(.bottom, 18)
                 actionButton
                     .frame(height: 54)
                     .padding(.bottom, 24)
+                    .disabled(isAdvancing)
+                    .opacity(isAdvancing ? 0.7 : 1)
             }
 
             if isReplay {
@@ -54,6 +76,7 @@ struct OnboardingView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .animation(nil, value: isAdvancing)
     }
 
     private var dots: some View {
@@ -108,11 +131,21 @@ struct OnboardingView: View {
     }
 
     private func advance() {
+        guard !isAdvancing, page < pageCount - 1 else { return }
+        isAdvancing = true
         UISelectionFeedbackGenerator().selectionChanged()
-        withAnimation(.easeOut(duration: 0.25)) { page += 1 }
+        // Page TabView animates selection itself — wrapping in withAnimation
+        // stacked transitions and froze on rapid Next taps.
+        page += 1
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            isAdvancing = false
+        }
     }
 
     private func finish() {
+        guard !isAdvancing else { return }
+        isAdvancing = true
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         hasCompletedOnboarding = true
         if isReplay { dismiss() }

@@ -1,7 +1,8 @@
 import CoreGraphics
 
 /// Maps normalized 0–1 image coordinates into a container.
-enum ImageContentMapper {
+/// nonisolated: used by ShotSpec geometry helpers off MainActor.
+nonisolated enum ImageContentMapper {
 
     enum Mode {
         /// `scaledToFill` — crops to cover the container.

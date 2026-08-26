@@ -5,10 +5,10 @@ extension UIImage {
 
     /// Display-tier max edge for in-memory gallery / reference thumbnails.
     /// Keeps launch RAM bounded while still looking sharp on modern iPhones.
-    static let displayMaxPixelSize: CGFloat = 1600
+    nonisolated static let displayMaxPixelSize: CGFloat = 1600
 
     /// Ghost / grid-tier max edge — overlays and cells don't need more.
-    static let overlayMaxPixelSize: CGFloat = 1024
+    nonisolated static let overlayMaxPixelSize: CGFloat = 1024
 
     /// Decodes a downsampled upright image via ImageIO without materializing
     /// the full-resolution bitmap first. Prefer this over `UIImage(data:)` +

@@ -1,20 +1,26 @@
 import SwiftUI
 
 /// Reference photos the user wants to recreate. Imported from the photo
-/// library and grouped by detected style. Tapping a reference makes it
-/// active and jumps to the camera.
+/// library and grouped by detected style. Tapping a reference expands it
+/// into a detail view (stats + use/delete); long-pressing starts
+/// multi-select for batch delete.
 struct ReferencesView: View {
     @EnvironmentObject var appState: AppState
+    // Only for the empty state's sample-pack import; picker imports go
+    // through CameraView's ReferencesViewModel. The service is stateless,
+    // so two instances can't disagree.
+    @StateObject private var vm = ReferencesViewModel()
     @State private var showSettings = false
     @State private var showHowTo = false
 
-    // Multi-select for batch delete, entered from the Select toolbar button.
+    // Multi-select for batch delete, entered by long-pressing a cell (the
+    // held photo starts checked); further taps check off others.
     @State private var isSelecting = false
     @State private var selectedIDs: Set<UUID> = []
     @State private var confirmDeleteSelection = false
 
-    // Long-press on a cell full-screens that reference.
-    @State private var fullscreenPhoto: ReferencePhoto?
+    // Tap on a cell expands that reference into the detail view.
+    @State private var detailPhoto: ReferencePhoto?
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 3), count: 3)
 
@@ -90,8 +96,9 @@ struct ReferencesView: View {
         .sheet(isPresented: $showHowTo) {
             HowToSheet()
         }
-        .fullScreenCover(item: $fullscreenPhoto) { photo in
-            ReferenceFullscreenView(photo: photo)
+        .fullScreenCover(item: $detailPhoto) { photo in
+            ReferenceDetailView(photo: photo)
+                .environmentObject(appState)
         }
         .onAppear {
             #if DEBUG
@@ -125,7 +132,9 @@ struct ReferencesView: View {
     // MARK: Empty state
 
     /// No in-empty-state Add Photos button: the shutter-position + picker in
-    /// CameraView's bottom chrome is the single import control in REFERENCE mode.
+    /// CameraView's bottom chrome is the single import control in REFERENCE
+    /// mode. The sample-pack button below isn't an import control in that
+    /// sense — it seeds bundled starter photos for users with nothing saved.
     private var emptyState: some View {
         VStack(spacing: 14) {
             Image(systemName: "photo.stack")
@@ -146,6 +155,21 @@ struct ReferencesView: View {
                 .font(.footnote)
                 .foregroundStyle(.tertiary)
                 .padding(.top, 2)
+
+            // Cold-start escape hatch: a bundled, license-free starter pack
+            // (SampleReferencePack) so the coaching is try-able before the
+            // user has saved anything worth recreating.
+            Button {
+                vm.importSamplePack(into: appState)
+            } label: {
+                Label("Try sample references", systemImage: "sparkles")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
+                    .background(Color.cameraYellow, in: Capsule())
+            }
+            .padding(.top, 10)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
@@ -173,8 +197,7 @@ struct ReferencesView: View {
                 if !appState.noSubjectReferences.isEmpty {
                     section(title: "No subject detected",
                             subtitle: "\(appState.noSubjectReferences.count)",
-                            photos: appState.noSubjectReferences,
-                            selectable: false)
+                            photos: appState.noSubjectReferences)
                 }
             }
             .padding(.top, 8)
@@ -213,7 +236,7 @@ struct ReferencesView: View {
     }
 
     private func section(
-        title: String, subtitle: String?, photos: [ReferencePhoto], selectable: Bool = true
+        title: String, subtitle: String?, photos: [ReferencePhoto]
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
@@ -234,61 +257,30 @@ struct ReferencesView: View {
                                   isActive: appState.activeReference?.id == photo.id,
                                   isSelecting: isSelecting,
                                   isSelected: selectedIDs.contains(photo.id))
+                        // Tap expands into the detail view (use / delete /
+                        // stats) — activating a reference lives there now,
+                        // so a stray grid tap can't yank you to the camera.
                         .onTapGesture {
                             if isSelecting {
                                 toggleSelection(photo.id)
                                 return
                             }
-                            guard selectable else { return }
-                            appState.setActiveReference(id: photo.id)
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                appState.selectedTab = .camera
-                            }
+                            detailPhoto = photo
                         }
-                        // Long-press full-screens the reference (selection
-                        // mode moved to the toolbar's Select button).
+                        // Long-press enters selection mode with the held
+                        // photo checked, ready for batch delete.
                         .onLongPressGesture {
                             guard !isSelecting else { return }
                             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                            fullscreenPhoto = photo
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                isSelecting = true
+                                selectedIDs = [photo.id]
+                            }
                         }
                 }
             }
             .padding(.horizontal, 16)
         }
-    }
-}
-
-// MARK: - ReferenceFullscreenView
-
-/// Long-press viewer: the whole reference, aspect-fit on black — no crop,
-/// no chrome beyond a close button. Tap anywhere to dismiss.
-private struct ReferenceFullscreenView: View {
-    let photo: ReferencePhoto
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-
-            Image(uiImage: photo.image)
-                .resizable()
-                .scaledToFit()
-        }
-        .overlay(alignment: .topLeading) {
-            Button { dismiss() } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 42, height: 42)
-                    .background(.ultraThinMaterial, in: Circle())
-            }
-            .padding(.horizontal, 14)
-            .padding(.top, 6)
-        }
-        .contentShape(Rectangle())
-        .onTapGesture { dismiss() }
-        .preferredColorScheme(.dark)
     }
 }
 

@@ -8,8 +8,11 @@ struct TiltPitchGuide: View {
     let targetPitch: Double
     let isLevel: Bool
     /// False when the reference's pitch confidence is below the FR-8 floor —
-    /// pitch lines and chevrons hide; the roll leveler stays.
+    /// pitch lines and chevrons hide.
     var showPitch: Bool = true
+    /// False when roll isn't EXIF-trusted (horizon-only / none) — leveler
+    /// hides so we neither invent a dutch target nor assert known-level.
+    var showRoll: Bool = true
 
     @State private var showYellowMerge = false
 
@@ -42,18 +45,20 @@ struct TiltPitchGuide: View {
                 if showPitch {
                     pitchLines
                 }
-                LevelIndicator(
-                    roll: roll,
-                    targetRoll: targetRoll,
-                    isLevel: isLevel
-                )
+                if showRoll {
+                    LevelIndicator(
+                        roll: roll,
+                        targetRoll: targetRoll,
+                        isLevel: isLevel
+                    )
+                }
             }
             .frame(width: lineLength * 1.2, height: 44)
 
             chevronSlot(pointingDown: false, visible: needsTiltUp)
         }
-        .onChange(of: pitch) { _ in updateMergeState() }
-        .onChange(of: targetPitch) { _ in updateMergeState(targetChanged: true) }
+        .onChange(of: pitch) { _, _ in updateMergeState() }
+        .onChange(of: targetPitch) { _, _ in updateMergeState(targetChanged: true) }
         .onAppear { updateMergeState() }
         // Pure indicator — let viewfinder taps/pinches pass through.
         .allowsHitTesting(false)

@@ -9,7 +9,8 @@ import CoreGraphics
 /// Tiers are evaluated T1 → T2 → T4 → T3. The PRD table lists T4 after T3,
 /// but T3 always succeeds, so the ultrawide prior must be checked first or
 /// it would never fire.
-enum PitchEstimator {
+/// nonisolated: import-time only, called from VisionAnalyzer off MainActor.
+nonisolated enum PitchEstimator {
 
     // MARK: - Tunable constants
 

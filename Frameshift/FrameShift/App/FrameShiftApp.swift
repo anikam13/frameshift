@@ -27,6 +27,11 @@ struct FrameShiftApp: App {
             }
             .task { await appState.restoreCapturedShots() }
             .task { await appState.restoreFilterPresets() }
+            .onChange(of: hasCompletedOnboarding) { _, completed in
+                if completed {
+                    appState.resumeDeferredAnalysisAfterOnboarding()
+                }
+            }
         }
     }
 }

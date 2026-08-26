@@ -5,44 +5,50 @@ import Combine
 @MainActor
 class ReferencesViewModel: ObservableObject {
 
-    private let analyzer = VisionAnalyzer()
-    private let segmenter = PersonSegmenter()
-
     /// Imports picked photos and kicks off Vision analysis for each.
     /// The photo appears immediately; its style/spec populates silently.
     func importPhotos(items: [PhotosPickerItem], into appState: AppState) {
         Task {
             for item in items {
-                guard
-                    let data = try? await item.loadTransferable(type: Data.self),
-                    let raw = UIImage(data: data)
-                else { continue }
+                guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
+                // Decode off-main — PhotosPicker payloads can be multi‑MB HEICs.
+                guard let raw = await Task.detached(priority: .utility, operation: {
+                    UIImage(data: data)
+                }).value else { continue }
+                appState.importReference(raw: raw, data: data)
+            }
+        }
+    }
 
-                let full = raw.upright()
-                let display = full.downsampled(maxPixelSize: UIImage.displayMaxPixelSize)
-
-                let photo = ReferencePhoto(image: display)
-                appState.addReference(photo, imageData: data)
-                let photoId = photo.id
-                let imageData = data
-
-                Task.detached(priority: .userInitiated) {
-                    let spec = await self.analyzer.analyze(image: full, imageData: imageData)
-                    await MainActor.run {
-                        if let spec {
-                            appState.updateSpec(for: photoId, spec: spec)
-                        } else {
-                            appState.markAnalysisFailed(for: photoId)
-                        }
-                    }
-                    // Person confirmed by the spec; cut them out for the ghost overlay.
-                    guard spec != nil,
-                          let cutout = await self.segmenter.cutout(from: full)
-                    else { return }
-                    let displayCutout = cutout.downsampled(maxPixelSize: UIImage.overlayMaxPixelSize)
-                    await MainActor.run {
-                        appState.updateCutout(for: photoId, cutout: displayCutout)
-                    }
+    /// Imports the bundled starter pack through the normal pipeline, so the
+    /// samples are analyzed, persisted, and deletable exactly like photos
+    /// the user picked. Fully offline — the images ship in Assets.xcassets
+    /// (see SampleReferencePack for provenance).
+    func importSamplePack(into appState: AppState) {
+        Task {
+            var importedAny = false
+            for name in SampleReferencePack.assetNames {
+                // Decode + re-encode off the main actor; assets are catalog
+                // JPEGs, so this is the one full-res pass per sample.
+                guard let pair = await Task.detached(priority: .utility, operation: {
+                    guard
+                        let image = UIImage(named: name),
+                        let data = image.jpegData(compressionQuality: 0.92),
+                        let raw = UIImage(data: data)
+                    else { return nil as (Data, UIImage)? }
+                    return (data, raw)
+                }).value else {
+                    #if DEBUG
+                    print("SampleReferencePack: missing asset \(name)")
+                    #endif
+                    continue
+                }
+                importedAny = true
+                appState.importReference(raw: pair.1, data: pair.0)
+            }
+            if !importedAny {
+                await MainActor.run {
+                    appState.showTransientNotice("Couldn't load sample photos")
                 }
             }
         }

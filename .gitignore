@@ -1,5 +1,6 @@
 # Xcode
 DerivedData/
+.derivedData/
 build/
 *.xcuserstate
 xcuserdata/
@@ -8,6 +9,18 @@ xcuserdata/
 *.ipa
 *.dSYM.zip
 *.dSYM
+
+# Signing / secrets
+.env
+.env.*
+*.mobileprovision
+*.p12
+*.cer
+*.certSigningRequest
+*.pem
+
+# Archive / export artifacts
+**/FrameShift 20*/
 
 # macOS
 .DS_Store
@@ -26,3 +39,11 @@ xcuserdata/
 
 # Local scratch / personal screenshots (not part of the app)
 apple cam/
+
+# App Store screenshot candidates (personal photos — do not commit)
+AppStoreScreenshots/
+ios/
+
+# Local App Store screenshot editor (Next.js scaffold + skill clone)
+tools/
+package-lock.json

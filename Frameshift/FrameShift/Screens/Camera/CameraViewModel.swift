@@ -68,7 +68,7 @@ class CameraViewModel: ObservableObject {
     private var activeSpec: ShotSpec?
     private let coach = CompositionCoach()
     private let liveAnalyzer = LiveVisionAnalyzer()
-    private var liveSubjectRaw: CGRect?
+    private var liveDetection: LiveVisionAnalyzer.Subject?
     private var liveContentSize: CGSize = .zero
     private var viewfinderSize: CGSize = .zero
     private var lightingScore: Double = 0.5
@@ -99,6 +99,9 @@ class CameraViewModel: ObservableObject {
     /// shouldn't queue a second full-quality capture before the first's
     /// completion runs. Burst bypasses this and overlaps captures on purpose.
     private var isCapturing = false
+    /// Suspended while AppState runs restore/import Vision so live pose
+    /// doesn't contend with the Neural Engine for the preview pipeline.
+    private var liveVisionSuspended = false
     private var cancellables = Set<AnyCancellable>()
 
     /// Seeds the drawer toggles from Settings' persisted defaults. The
@@ -174,6 +177,18 @@ class CameraViewModel: ObservableObject {
             motion.stop()
             activeTip = nil
             activeTipKind = nil
+            // Frames stop flowing while inactive (wireVideoFrames gates on
+            // this flag) — drop the last detection so re-entry can't coach
+            // against a stale subject.
+            liveDetection = nil
+        }
+    }
+
+    func setLiveVisionSuspended(_ suspended: Bool) {
+        guard liveVisionSuspended != suspended else { return }
+        liveVisionSuspended = suspended
+        if suspended {
+            liveDetection = nil
         }
     }
 
@@ -408,35 +423,51 @@ class CameraViewModel: ObservableObject {
 
     /// Physical-space roll target for MotionService's level latch: negated on
     /// the front camera, whose mirrored preview flips apparent rotation.
+    /// Untrusted roll (horizon / none) returns 0 but callers must not treat
+    /// that as a known-level latch — see `observeMotion` haptic gating.
     private func physicalRollTarget(for spec: ShotSpec?) -> Double {
-        let target = spec?.coachRollTarget ?? 0
+        guard let spec, spec.hasTrustedRoll else { return 0 }
+        let target = spec.coachRollTarget
         return isFrontCamera ? -target : target
     }
 
     private func applySpec(_ spec: ShotSpec?) {
         motion.targetRoll = physicalRollTarget(for: spec)
+        if spec?.hasTrustedRoll != true {
+            isLevel = false
+            levelHapticFired = false
+        }
         guard let spec else { return }
-        if zoomLevels.contains(spec.recommendedZoom) {
-            setZoom(spec.recommendedZoom)
+        // Silent zoom — public setZoom fires selection haptics meant for pill taps.
+        if zoomLevels.contains(spec.recommendedZoom),
+           abs(zoomFactor - spec.recommendedZoom) > 0.01 {
+            zoomFactor = spec.recommendedZoom
+            camera.setZoom(spec.recommendedZoom, animated: true)
         }
     }
 
     private func wireVideoFrames() {
         liveAnalyzer.onUpdate = { [weak self] subject, lighting, contentSize in
             guard let self else { return }
-            self.liveSubjectRaw = subject
+            self.liveDetection = subject
             self.liveContentSize = contentSize
             self.lightingScore = lighting
             self.evaluateCoaching()
         }
         camera.onVideoFrame = { [weak self] buffer in
             guard let self else { return }
+            // No consumer without an active spec in camera mode — skip the
+            // Vision pass entirely (reference browsing, no-reference sessions).
+            // Also yield while restore/import Vision owns the Neural Engine.
+            guard self.cameraModeActive,
+                  self.activeSpec != nil,
+                  !self.liveVisionSuspended else { return }
             self.liveAnalyzer.process(pixelBuffer: buffer, isFrontCamera: self.isFrontCamera)
         }
     }
 
     private func liveSubjectInViewfinder() -> CGRect? {
-        guard let raw = liveSubjectRaw, viewfinderSize.width > 0, liveContentSize.width > 0 else {
+        guard let raw = liveDetection?.box, viewfinderSize.width > 0, liveContentSize.width > 0 else {
             return nil
         }
         return ImageContentMapper.viewfinderNormalized(
@@ -445,6 +476,43 @@ class CameraViewModel: ObservableObject {
             in: viewfinderSize,
             mode: .fill
         )
+    }
+
+    /// Live head-center offset from the reference head circle, in units of
+    /// the circle's radius (viewfinder space). The circle is what the user
+    /// is visually matching, so this is the primary placement signal.
+    /// nil when live pose is unavailable.
+    private func liveHeadOffset(spec: ShotSpec) -> CGVector? {
+        guard let head = liveDetection?.headCenter,
+              viewfinderSize.width > 0, liveContentSize.width > 0 else { return nil }
+        let live = ImageContentMapper.point(
+            head, contentSize: liveContentSize, in: viewfinderSize, mode: .fill
+        )
+        let target = spec.headCircle(in: viewfinderSize)
+        guard target.radius > 0 else { return nil }
+        return CGVector(
+            dx: (live.x - target.center.x) / target.radius,
+            dy: (live.y - target.center.y) / target.radius
+        )
+    }
+
+    /// live/reference shoulder-width ratio in viewfinder space — a distance
+    /// signal that, unlike box height, doesn't distort when raised arms grow
+    /// the bounding box. nil when either side's shoulders are unusable.
+    private func liveShoulderRatio(spec: ShotSpec) -> CGFloat? {
+        guard let left = liveDetection?.leftShoulder,
+              let right = liveDetection?.rightShoulder,
+              viewfinderSize.width > 0, liveContentSize.width > 0 else { return nil }
+        let livePoints = [left, right].map {
+            ImageContentMapper.point($0, contentSize: liveContentSize, in: viewfinderSize, mode: .fill)
+        }
+        let (refLeft, refRight) = spec.shoulderEndpoints(in: viewfinderSize)
+        let liveWidth = hypot(livePoints[1].x - livePoints[0].x, livePoints[1].y - livePoints[0].y)
+        let refWidth = hypot(refRight.x - refLeft.x, refRight.y - refLeft.y)
+        // Reference shoulders can be synthesized from a degenerate box —
+        // don't ratio against a sliver.
+        guard refWidth > 8, liveWidth > 0 else { return nil }
+        return liveWidth / refWidth
     }
 
     private func referenceSubjectInViewfinder(spec: ShotSpec) -> CGRect {
@@ -510,8 +578,14 @@ class CameraViewModel: ObservableObject {
             .removeDuplicates()
             .sink { [weak self] isLevel in
                 guard let self else { return }
-                self.isLevel = isLevel
-                guard self.cameraModeActive else { return }
+                // No EXIF attitude → don't latch / haptic "level" as if the
+                // reference were known-level (screenshots, horizon-only).
+                let trustsRoll = self.activeSpec?.hasTrustedRoll == true
+                self.isLevel = trustsRoll && isLevel
+                guard self.cameraModeActive, trustsRoll else {
+                    if !trustsRoll { self.levelHapticFired = false }
+                    return
+                }
                 if isLevel && !self.levelHapticFired {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     self.levelHapticFired = true
@@ -534,6 +608,8 @@ class CameraViewModel: ObservableObject {
                 spec: spec,
                 liveSubject: liveSubjectInViewfinder(),
                 referenceSubject: referenceSubjectInViewfinder(spec: spec),
+                headOffset: liveHeadOffset(spec: spec),
+                shoulderRatio: liveShoulderRatio(spec: spec),
                 roll: deviceRoll,
                 pitch: devicePitch,
                 zoom: zoomFactor,

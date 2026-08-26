@@ -18,7 +18,9 @@ struct FilterPresetSheet: View {
 
     /// A selectable look: the reference-derived color match, the fixed camera
     /// presets, and the user's saved custom presets.
-    enum Look: Hashable {
+    /// nonisolated: used as a Hashable dictionary key inside detached
+    /// preview-render tasks, so its conformance can't be MainActor-bound.
+    nonisolated enum Look: Hashable {
         case matchReference
         case preset(FilterPreset)
         case custom(UUID)
@@ -269,7 +271,7 @@ struct FilterPresetSheet: View {
                 appState.showTransientNotice("Couldn't apply that filter")
                 return
             }
-            let newID = appState.addCapturedShot(filtered, referenceID: referenceID)
+            let newID = await appState.addCapturedShotAsync(filtered, referenceID: referenceID)
             isSaving = false
             dismiss()
             onSaved(newID)
@@ -281,15 +283,16 @@ struct FilterPresetSheet: View {
     private func generatePreviews() async {
         let source = shot.image
         let jobs = looks.map { ($0, matchTarget(for: $0)) }
-        let rendered = await Task.detached(priority: .userInitiated) {
-            var result: [Look: UIImage] = [:]
-            for (look, target) in jobs {
-                result[look] = Self.render(look, on: source, matchTarget: target)
+        // Utility + progressive: opening the sheet must not spike CPU against
+        // the still-mounted camera session underneath the cover.
+        for (look, target) in jobs {
+            let rendered = await Task.detached(priority: .utility) {
+                Self.render(look, on: source, matchTarget: target)
+            }.value
+            if let rendered, previews[look] == nil {
+                previews[look] = rendered
             }
-            return result
-        }.value
-        // Merge, keeping any preview a just-added preset rendered meanwhile.
-        previews.merge(rendered) { current, _ in current }
+        }
     }
 
     // MARK: Custom presets

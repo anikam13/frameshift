@@ -3,7 +3,8 @@ import CoreImage.CIFilterBuiltins
 import UIKit
 
 /// The gallery's camera-look presets, modeled on popular travel cameras.
-enum FilterPreset: String, CaseIterable, Identifiable {
+/// nonisolated: pure value type used as a Hashable key off the main actor.
+nonisolated enum FilterPreset: String, CaseIterable, Identifiable {
     /// 90s flash point-and-shoot: warm, contrasty, heavy vignette, grainy.
     case disposable = "Disposable"
     /// 35mm negative: lifted blacks, muted color, gentle warmth, fine grain.
