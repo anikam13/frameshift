@@ -8,7 +8,7 @@ nonisolated struct ShotSpec: Equatable, Codable {
 
     /// Bump when VisionAnalyzer / estimator logic changes coaching geometry,
     /// categories, or trust rules. Mismatched stored versions reanalyze once.
-    static let analyzerVersion = 1
+    static let analyzerVersion = 4
 
     // Full-body detection (distance / framing coaching)
     let subjectTop: CGFloat
@@ -53,6 +53,13 @@ nonisolated struct ShotSpec: Equatable, Codable {
     /// dutch angle or assert "level" from a horizon guess.
     let rollSource: RollSource
     let recommendedZoom: CGFloat
+    /// How much of the body pose is in frame. Framing used to key only off
+    /// the person-box height, which labels a tight full-body 3:4 portrait as
+    /// a close-up because the box fills the frame.
+    let bodyCoverage: BodyCoverage
+    /// Visual low/high-angle look when EXIF attitude is missing (screenshots,
+    /// generated stills). Coaching still uses `targetPitch`.
+    let angleLook: AngleLook
 
     enum HeadBoundsSource: String, Equatable, Codable {
         case faceRect, faceLandmarks, pose, fallback
@@ -66,14 +73,24 @@ nonisolated struct ShotSpec: Equatable, Codable {
         case none
     }
 
+    /// Lowest confident pose joints in frame.
+    enum BodyCoverage: String, Equatable, Codable {
+        case feet, knees, torso, unknown
+    }
+
+    /// Composition look, independent of coaching pitch.
+    enum AngleLook: String, Equatable, Codable {
+        case none, low, high
+    }
+
     /// Below this, `targetPitch` is stored as 0 and pitch coaching disabled.
     static let minimumPitchConfidence: Double = 0.4
 
     var hasTrustedPitch: Bool { pitchConfidence >= Self.minimumPitchConfidence }
 
     /// Only Apple maker-note gravity (EXIF attitude) is trustworthy enough
-    /// for Tilted grouping and hard roll coaching. Horizon / none → omit
-    /// roll matching entirely (neither dutch-angle nor forced-level).
+    /// for hard roll coaching. Horizon / none → omit roll matching entirely
+    /// (neither dutch-angle nor forced-level).
     var hasTrustedRoll: Bool { rollSource == .exifAttitude }
 
     /// Roll target for live coaching when `hasTrustedRoll`. Meaningless
@@ -95,7 +112,7 @@ nonisolated struct ShotSpec: Equatable, Codable {
         case nose, neck, leftShoulder, rightShoulder, leftEye, rightEye
         case headCenterX, headCenterY, headRadius, headBoundsSource
         case targetRoll, targetPitch, pitchConfidence, rollConfidence
-        case rollSource, recommendedZoom, referenceSize
+        case rollSource, recommendedZoom, bodyCoverage, angleLook, referenceSize
     }
 
     private struct PointDTO: Codable {
@@ -125,6 +142,7 @@ nonisolated struct ShotSpec: Equatable, Codable {
         targetRoll: Double?, targetPitch: Double?,
         pitchConfidence: Double, rollConfidence: Double,
         rollSource: RollSource, recommendedZoom: CGFloat,
+        bodyCoverage: BodyCoverage, angleLook: AngleLook,
         referenceSize: CGSize
     ) {
         self.subjectTop = subjectTop
@@ -151,6 +169,8 @@ nonisolated struct ShotSpec: Equatable, Codable {
         self.rollConfidence = rollConfidence
         self.rollSource = rollSource
         self.recommendedZoom = recommendedZoom
+        self.bodyCoverage = bodyCoverage
+        self.angleLook = angleLook
         self.referenceSize = referenceSize
     }
 
@@ -182,6 +202,8 @@ nonisolated struct ShotSpec: Equatable, Codable {
         rollConfidence = try c.decodeIfPresent(Double.self, forKey: .rollConfidence) ?? 0
         rollSource = try c.decodeIfPresent(RollSource.self, forKey: .rollSource) ?? .none
         recommendedZoom = CGFloat(try c.decode(Double.self, forKey: .recommendedZoom))
+        bodyCoverage = try c.decodeIfPresent(BodyCoverage.self, forKey: .bodyCoverage) ?? .unknown
+        angleLook = try c.decodeIfPresent(AngleLook.self, forKey: .angleLook) ?? .none
         referenceSize = try c.decode(SizeDTO.self, forKey: .referenceSize).size
     }
 
@@ -211,6 +233,8 @@ nonisolated struct ShotSpec: Equatable, Codable {
         try c.encode(rollConfidence, forKey: .rollConfidence)
         try c.encode(rollSource, forKey: .rollSource)
         try c.encode(Double(recommendedZoom), forKey: .recommendedZoom)
+        try c.encode(bodyCoverage, forKey: .bodyCoverage)
+        try c.encode(angleLook, forKey: .angleLook)
         try c.encode(SizeDTO(referenceSize), forKey: .referenceSize)
     }
 
@@ -268,7 +292,7 @@ nonisolated struct ShotSpec: Equatable, Codable {
 
 // MARK: - Style classification
 
-extension ShotSpec {
+nonisolated extension ShotSpec {
     enum Framing: String, CaseIterable {
         case wide    = "Full body"
         case medium  = "Medium shot"
@@ -276,11 +300,10 @@ extension ShotSpec {
     }
 
     /// References-tab grouping. Priority-ordered: each photo lands in the
-    /// first category that matches, so the most distinctive thing about a
-    /// shot (a deliberate tilt, an extreme angle, a lens choice) names its
-    /// group rather than everything collapsing into the three framing sizes.
+    /// first category that matches. Deliberate camera roll used to name a
+    /// "Tilted" group, but a posed/bent subject reads the same as a dutch
+    /// angle, so roll is coaching-only and does not group.
     enum StyleCategory: String, CaseIterable {
-        case tilted     = "Tilted"
         case lowAngle   = "Low angle"
         case highAngle  = "High angle"
         case facingAway = "Facing away"
@@ -291,18 +314,19 @@ extension ShotSpec {
         case fullBody   = "Full body"
     }
 
-    /// ~3.4° — below this an EXIF roll reads as level, not a dutch angle.
-    private static let tiltedRollThreshold = 0.06
     /// ~8.5° of camera pitch before a shot reads as a low/high-angle look.
     private static let angledPitchThreshold = 0.15
 
+    /// Padded head circle filling this much of the short image side is a
+    /// head-and-shoulders close-up, even if the person-box is only torso-tall.
+    static let closeUpHeadRadius = 0.18
+    /// Tight 3:4 crops make the person-box ≥0.75; a head this small is still
+    /// a 3/4 or full-length shot, not a close-up.
+    static let closeUpHeadRadiusWhenFilled = 0.14
+
     var styleCategory: StyleCategory {
-        // Horizon-only roll must not name the group — screenshots have no
-        // attitude and Vision's horizon is too easy to false-positive.
-        if hasTrustedRoll, let roll = targetRoll,
-           abs(roll) >= Self.tiltedRollThreshold {
-            return .tilted
-        }
+        if angleLook == .low { return .lowAngle }
+        if angleLook == .high { return .highAngle }
         if hasTrustedPitch, let pitch = targetPitch {
             if pitch >= Self.angledPitchThreshold { return .lowAngle }
             if pitch <= -Self.angledPitchThreshold { return .highAngle }
@@ -330,11 +354,50 @@ extension ShotSpec {
     }
 
     var framing: Framing {
+        Self.inferFraming(
+            subjectHeight: subjectHeight,
+            headRadius: headRadius,
+            bodyCoverage: bodyCoverage
+        )
+    }
+
+    /// Pose feet beat the person-box height: a standing portrait that fills
+    /// a 3:4 frame has `subjectHeight` ≥ 0.75 and used to land in Close-up.
+    static func inferFraming(
+        subjectHeight: CGFloat,
+        headRadius: CGFloat,
+        bodyCoverage: BodyCoverage
+    ) -> Framing {
+        if headRadius >= closeUpHeadRadius { return .closeUp }
+        switch bodyCoverage {
+        case .feet:  return .wide
+        case .knees: return .medium
+        case .torso, .unknown: break
+        }
         switch subjectHeight {
         case ..<0.45: return .wide
         case ..<0.75: return .medium
-        default:      return .closeUp
+        default:
+            return headRadius >= closeUpHeadRadiusWhenFilled ? .closeUp : .medium
         }
+    }
+
+    /// Knees much wider than the shoulders, hips still narrow: lower body is
+    /// closer to the camera (seated café-style low angle). A wide sitting
+    /// stance (hips also wide) is not an angle.
+    static func inferAngleLook(
+        shoulderSpan: CGFloat?,
+        hipSpan: CGFloat?,
+        kneeSpan: CGFloat?,
+        hasAnkles: Bool
+    ) -> AngleLook {
+        guard hasAnkles,
+              let shoulder = shoulderSpan, shoulder > 0,
+              let hip = hipSpan, hip > 0,
+              let knee = kneeSpan, knee > 0
+        else { return .none }
+        if knee >= shoulder * 1.6, hip <= shoulder * 0.65 { return .low }
+        return .none
     }
 
     var placement: Placement {

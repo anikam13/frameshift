@@ -9,6 +9,9 @@ nonisolated struct ReferenceEXIF {
     /// 35mm-equivalent focal length, when derivable.
     let focalLength35mm: CGFloat?
 
+    /// EXIF lens model, when present (e.g. "iPhone 16 Pro front camera").
+    let lensModel: String?
+
     /// Apple maker-note acceleration vector (tag 8), in units of g, device
     /// coordinate frame (same axes as CoreMotion). Only present in original
     /// iPhone captures; stripped by re-encodes and most web downloads.
@@ -18,15 +21,19 @@ nonisolated struct ReferenceEXIF {
         if let data = imageData, let props = properties(from: data) {
             return ReferenceEXIF(
                 focalLength35mm: focalLength(from: props),
+                lensModel: lensModel(from: props),
                 accelerationVector: accelerationVector(from: props)
             )
         }
         // Re-encoded fallback keeps focal length but strips maker notes.
         guard let data = image.jpegData(compressionQuality: 1),
               let props = properties(from: data)
-        else { return ReferenceEXIF(focalLength35mm: nil, accelerationVector: nil) }
+        else {
+            return ReferenceEXIF(focalLength35mm: nil, lensModel: nil, accelerationVector: nil)
+        }
         return ReferenceEXIF(
             focalLength35mm: focalLength(from: props),
+            lensModel: lensModel(from: props),
             accelerationVector: nil
         )
     }
@@ -47,6 +54,21 @@ nonisolated struct ReferenceEXIF {
             return fl * 1.6
         }
         return nil
+    }
+
+    private static func lensModel(from props: [String: Any]) -> String? {
+        if let exif = props[kCGImagePropertyExifDictionary as String] as? [String: Any],
+           let model = exif[kCGImagePropertyExifLensModel as String] as? String,
+           !model.isEmpty {
+            return model
+        }
+        return nil
+    }
+
+    /// Front / TrueDepth captures are almost always the 1× selfie camera.
+    var isFrontCamera: Bool {
+        guard let lens = lensModel?.lowercased() else { return false }
+        return lens.contains("front") || lens.contains("truedepth") || lens.contains("facetime")
     }
 
     /// Apple maker note tag 8 ("AccelerationVector"): gravity direction at

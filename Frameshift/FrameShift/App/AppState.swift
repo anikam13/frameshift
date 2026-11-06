@@ -80,23 +80,32 @@ class AppState: ObservableObject {
     }
 
     /// Shared import path for PhotosPicker and sample pack.
-    /// Shows the photo immediately, persists original bytes, then analyzes off-main.
-    func importReference(raw: UIImage, data: Data) {
-        let imageData = data
+    /// Shows the photo immediately, analyzes from the original (EXIF roll),
+    /// and persists a compressed JPEG instead of the source HEIC/PNG.
+    func importReference(raw: UIImage, data: Data, bundledAssetName: String? = nil) {
+        let originalData = data
+        let assetName = bundledAssetName
         // Decode/downsample off the main actor — sample pack / multi-import
         // used to upright full-res bitmaps synchronously and freeze UI.
         Task.detached(priority: .utility) { [analyzer, segmenter, store] in
             let full = raw.upright()
+            let stored = full.compressedReferenceJPEG() ?? originalData
             let display = full.downsampled(maxPixelSize: UIImage.displayMaxPixelSize)
             let photoId = await MainActor.run {
-                let photo = ReferencePhoto(image: display)
-                self.addReference(photo, imageData: imageData)
+                let photo = ReferencePhoto(image: display, bundledAssetName: assetName)
+                self.addReference(photo, imageData: stored)
                 return photo.id
             }
             await self.performVisionWork {
-                let spec = await analyzer.analyze(image: full, imageData: imageData)
+                let spec = await analyzer.analyze(image: full, imageData: originalData)
                 if let spec {
-                    let cutout = await segmenter.cutout(from: full)
+                    let subject = CGRect(
+                        x: spec.subjectLeft,
+                        y: spec.subjectTop,
+                        width: spec.subjectWidth,
+                        height: spec.subjectHeight
+                    )
+                    let cutout = await segmenter.cutout(from: full, subjectNormalized: subject)
                     let displayCutout = cutout?.downsampled(maxPixelSize: UIImage.overlayMaxPixelSize)
                     if let displayCutout {
                         _ = store.saveCutout(displayCutout, id: photoId)
@@ -162,7 +171,22 @@ class AppState: ObservableObject {
         let restored = await Task.detached(priority: .utility) { [store] in
             store.loadAll()
         }.value
-        guard !restored.references.isEmpty else { return }
+
+        let onboardingDone = UserDefaults.standard.bool(
+            forKey: "frameshift.hasCompletedOnboarding"
+        )
+
+        if restored.references.isEmpty {
+            // First launch: put the sample pack in the library before
+            // onboarding ends, but hold Vision until Next isn't on screen.
+            guard !onboardingDone else { return }
+            await seedBundledSamplesIntoLibrary()
+            guard !references.isEmpty else { return }
+            activateBundledSample(named: OnboardingReferenceChoices.featured)
+            let ids = references.map(\.id)
+            deferredRestoreAnalysis = (ids[activeReferenceIndex], ids.filter { $0 != ids[activeReferenceIndex] })
+            return
+        }
 
         // Publish display images + specs first — no cutouts — so the mode pill
         // and references grid become usable immediately.
@@ -173,7 +197,8 @@ class AppState: ObservableObject {
                 importedAt: $0.importedAt,
                 spec: $0.spec,
                 personCutout: nil,
-                analysisFailed: $0.analysisFailed
+                analysisFailed: $0.analysisFailed,
+                bundledAssetName: $0.bundledAssetName
             )
         }
         if let activeID = restored.activeID,
@@ -200,14 +225,36 @@ class AppState: ObservableObject {
 
         // First-launch onboarding still mounts this restore task — hold Vision
         // until the user finishes so Next isn't fighting Neural Engine.
-        let onboardingDone = UserDefaults.standard.bool(
-            forKey: "frameshift.hasCompletedOnboarding"
-        )
         if onboardingDone {
             scheduleRestoreAnalysis(activeID: first, queuedIDs: rest, yieldForCamera: true)
         } else {
             deferredRestoreAnalysis = (first, rest)
         }
+    }
+
+    /// Writes the bundled sample pack into an empty first-launch library.
+    /// Vision stays deferred so onboarding's coach demo isn't starved.
+    private func seedBundledSamplesIntoLibrary() async {
+        guard references.isEmpty else { return }
+        let names = SampleReferencePack.assetNames
+        let prepared = await Task.detached(priority: .utility) {
+            names.compactMap { name -> (String, UIImage, Data)? in
+                guard let image = UIImage(named: name) else { return nil }
+                let full = image.upright()
+                guard let data = full.compressedReferenceJPEG() else { return nil }
+                let display = full.downsampled(maxPixelSize: UIImage.displayMaxPixelSize)
+                return (name, display, data)
+            }
+        }.value
+        for (name, display, data) in prepared {
+            addReference(ReferencePhoto(image: display, bundledAssetName: name), imageData: data)
+        }
+    }
+
+    func activateBundledSample(named: String) {
+        guard let index = references.firstIndex(where: { $0.bundledAssetName == named }) else { return }
+        activeReferenceIndex = index
+        persistManifest()
     }
 
     /// Called when first-launch onboarding completes (or is already done).
@@ -248,7 +295,17 @@ class AppState: ObservableObject {
                 return
             }
             // Balanced is enough for the ghost overlay and much cheaper at migrate.
-            let cutout = await personSegmenter.cutout(from: full.image, quality: .balanced)
+            let subject = CGRect(
+                x: spec.subjectLeft,
+                y: spec.subjectTop,
+                width: spec.subjectWidth,
+                height: spec.subjectHeight
+            )
+            let cutout = await personSegmenter.cutout(
+                from: full.image,
+                quality: .balanced,
+                subjectNormalized: subject
+            )
             let displayCutout = cutout?.downsampled(maxPixelSize: UIImage.overlayMaxPixelSize)
             if let displayCutout {
                 _ = imageStore.saveCutout(displayCutout, id: id)
@@ -297,7 +354,8 @@ class AppState: ObservableObject {
                     analyzerVersion: (photo.spec != nil || photo.analysisFailed)
                         ? ShotSpec.analyzerVersion : nil,
                     analysisFailed: photo.analysisFailed ? true : nil,
-                    spec: photo.spec
+                    spec: photo.spec,
+                    bundledAssetName: photo.bundledAssetName
                 )
             }
         ))
@@ -348,6 +406,50 @@ class AppState: ObservableObject {
 
     var unanalyzedReferences: [ReferencePhoto] {
         references.filter { $0.spec == nil && !$0.analysisFailed }
+    }
+
+    /// Bundled samples not yet in the library. Empty-state and the in-grid
+    /// "Add sample references" row both key off this.
+    var missingBundledSampleNames: [String] {
+        let have = Set(references.compactMap(\.bundledAssetName))
+        return SampleReferencePack.assetNames.filter { !have.contains($0) }
+    }
+
+    /// Imports remaining bundled stills through the normal pipeline.
+    /// `preferring` is inserted last so it becomes the active reference.
+    func importBundledSamples(preferring selected: String? = nil) {
+        let have = Set(references.compactMap(\.bundledAssetName))
+        var names = SampleReferencePack.assetNames.filter { !have.contains($0) }
+        if let selected {
+            names.removeAll { $0 == selected }
+            if !have.contains(selected) {
+                names.append(selected)
+            }
+        }
+        guard !names.isEmpty else { return }
+        Task {
+            var importedAny = false
+            for name in names {
+                guard let pair = await Task.detached(priority: .utility, operation: {
+                    guard
+                        let image = UIImage(named: name),
+                        let data = image.compressedReferenceJPEG(),
+                        let raw = UIImage(data: data)
+                    else { return nil as (Data, UIImage)? }
+                    return (data, raw)
+                }).value else {
+                    #if DEBUG
+                    print("SampleReferencePack: missing asset \(name)")
+                    #endif
+                    continue
+                }
+                importedAny = true
+                importReference(raw: pair.1, data: pair.0, bundledAssetName: name)
+            }
+            if !importedAny {
+                showTransientNotice("Couldn't load sample photos")
+            }
+        }
     }
 
     /// References Vision couldn't find a person in — can't drive camera
@@ -430,6 +532,17 @@ class AppState: ObservableObject {
         persistCapturedManifest()
         Task.detached(priority: .utility) { [capturedStore] in
             capturedStore.deleteImage(id: id)
+        }
+    }
+
+    /// Library mass-delete — one persist pass, then files off-main.
+    func removeCapturedShots(ids: [UUID]) {
+        guard !ids.isEmpty else { return }
+        let idSet = Set(ids)
+        capturedShots.removeAll { idSet.contains($0.id) }
+        persistCapturedManifest()
+        Task.detached(priority: .utility) { [capturedStore] in
+            for id in ids { capturedStore.deleteImage(id: id) }
         }
     }
 

@@ -94,7 +94,7 @@ FrameShift/                                 // workspace root
         │   ├── CompositionCoach.swift      // tips + CompositionProgress
         │   ├── CameraService.swift         // session, zoom, flash, front, capture crop
         │   ├── MotionService.swift
-        │   ├── SampleReferencePack.swift   // bundled starter refs (Pexels; provenance inside)
+        │   ├── SampleReferencePack.swift   // bundled starter refs (Gemini stills)
         │   ├── ReferenceStore.swift
         │   ├── CapturedStore.swift
         │   ├── PhotoLibrarySaver.swift     // add-only Photos writes
@@ -155,9 +155,10 @@ Live coaching (when an active reference has a `ShotSpec`): head circle (`Subject
 3. Missing / stale version (or pre-persistence manifests) → serial reanalyze
    (active first, yield for camera, then persist) — same queue as imports
 
-Cold start empty state: "Try sample references" runs 6 bundled Pexels photos
-(`Assets.xcassets/SampleRef*`, provenance in `Services/SampleReferencePack.swift`)
-through the import pipeline. Fully offline; the no-network rule holds.
+Cold start empty state: "Try sample references" runs 9 bundled Gemini
+(Nano Banana) stills (`Assets.xcassets/SampleRef*`, listed in
+`Services/SampleReferencePack.swift`) through the import pipeline. Fully
+offline; the no-network rule holds. Onboarding carousel uses six of those.
 
 ### Capture → persist
 1. `CameraService.capturePhoto` → cropped `UIImage`

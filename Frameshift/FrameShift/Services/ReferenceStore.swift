@@ -16,9 +16,10 @@ nonisolated struct ReferenceStore {
             var analyzerVersion: Int?
             var analysisFailed: Bool?
             var spec: ShotSpec?
+            var bundledAssetName: String?
 
             private enum CodingKeys: String, CodingKey {
-                case id, importedAt, analyzerVersion, analysisFailed, spec
+                case id, importedAt, analyzerVersion, analysisFailed, spec, bundledAssetName
             }
 
             init(
@@ -26,13 +27,15 @@ nonisolated struct ReferenceStore {
                 importedAt: Date,
                 analyzerVersion: Int? = nil,
                 analysisFailed: Bool? = nil,
-                spec: ShotSpec? = nil
+                spec: ShotSpec? = nil,
+                bundledAssetName: String? = nil
             ) {
                 self.id = id
                 self.importedAt = importedAt
                 self.analyzerVersion = analyzerVersion
                 self.analysisFailed = analysisFailed
                 self.spec = spec
+                self.bundledAssetName = bundledAssetName
             }
 
             init(from decoder: Decoder) throws {
@@ -41,6 +44,7 @@ nonisolated struct ReferenceStore {
                 importedAt = try c.decode(Date.self, forKey: .importedAt)
                 analyzerVersion = try c.decodeIfPresent(Int.self, forKey: .analyzerVersion)
                 analysisFailed = try c.decodeIfPresent(Bool.self, forKey: .analysisFailed)
+                bundledAssetName = try c.decodeIfPresent(String.self, forKey: .bundledAssetName)
                 // A single stale/partial ShotSpec must not fail the whole
                 // library decode (that used to wipe references from memory).
                 if c.contains(.spec), try c.decodeNil(forKey: .spec) == false {
@@ -57,6 +61,7 @@ nonisolated struct ReferenceStore {
                 try c.encodeIfPresent(analyzerVersion, forKey: .analyzerVersion)
                 try c.encodeIfPresent(analysisFailed, forKey: .analysisFailed)
                 try c.encodeIfPresent(spec, forKey: .spec)
+                try c.encodeIfPresent(bundledAssetName, forKey: .bundledAssetName)
             }
         }
         var activeReferenceID: UUID?
@@ -70,6 +75,7 @@ nonisolated struct ReferenceStore {
         let image: UIImage
         let spec: ShotSpec?
         let analysisFailed: Bool
+        let bundledAssetName: String?
         /// True when cached analysis is missing or version-stale.
         let needsAnalysis: Bool
         /// Cutout PNG exists on disk — load via `loadCutout` when needed.
@@ -90,8 +96,8 @@ nonisolated struct ReferenceStore {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
-    // Original imported bytes, format untouched (JPEG/HEIC/PNG), so re-analysis
-    // on restore sees the same EXIF the import-time analysis did.
+    // Compressed JPEG (longest edge `referenceMaxPixelSize`). First analysis
+    // still uses the original picker bytes for EXIF; restore re-reads this file.
     private func imageURL(for id: UUID) -> URL {
         directory.appendingPathComponent("\(id.uuidString).img")
     }
@@ -164,6 +170,7 @@ nonisolated struct ReferenceStore {
                 image: image,
                 spec: spec,
                 analysisFailed: failed,
+                bundledAssetName: entry.bundledAssetName,
                 needsAnalysis: needsAnalysis,
                 hasCutoutOnDisk: hasCutout && !needsAnalysis && !failed
             )

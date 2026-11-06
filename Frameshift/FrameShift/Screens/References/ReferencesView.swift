@@ -113,14 +113,13 @@ struct ReferencesView: View {
         }
     }
 
-    /// App wordmark in the bar above the References title. System font only
-    /// (design-token rule) — the bare viewfinder outline and "Frame" in
-    /// camera yellow carry the brand.
+    /// App wordmark in the bar above the References title. Corner brackets
+    /// plus the off-center head circle — same mark as the app icon.
     private var wordmark: some View {
         HStack(spacing: 6) {
-            Image(systemName: "viewfinder")
-                .font(.system(size: 19, weight: .semibold))
+            FrameShiftMark()
                 .foregroundStyle(Color.cameraYellow)
+                .frame(width: 22, height: 22)
             (
                 Text("Frame").foregroundStyle(Color.cameraYellow)
                 + Text("Shift").foregroundStyle(.white)
@@ -179,11 +178,30 @@ struct ReferencesView: View {
         .padding(.bottom, CameraView.bottomChromeHeight)
     }
 
+    private var samplePackBanner: some View {
+        Button {
+            vm.importSamplePack(into: appState)
+        } label: {
+            Label("Add sample references", systemImage: "sparkles")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.black)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Color.cameraYellow, in: Capsule())
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
+        .accessibilityHint("Adds the bundled starter photos that were not imported during onboarding.")
+    }
+
     // MARK: Grouped grid
 
     private var groupedGrid: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 26, pinnedViews: []) {
+                if !isSelecting, !appState.missingBundledSampleNames.isEmpty {
+                    samplePackBanner
+                }
                 if !appState.unanalyzedReferences.isEmpty {
                     section(title: "Analyzing…",
                             subtitle: nil,

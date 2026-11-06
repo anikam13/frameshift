@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Apple Camera-style photo preview, opened from the bottom-left thumbnail.
 /// Back chevron + date pill up top, swipeable photo, filmstrip, and the
@@ -16,6 +17,8 @@ struct GalleryPreviewView: View {
     @State private var showLibrary = false
     @State private var filterTarget: CapturedPhoto?
     @State private var chromeVisible = true
+    /// 0…1 while the photo is being dragged down to close.
+    @State private var dismissDrag: CGFloat = 0
 
     private var shots: [CapturedPhoto] { appState.capturedShots }
 
@@ -26,15 +29,22 @@ struct GalleryPreviewView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.black
+                .opacity(1 - dismissDrag * 0.88)
+                .ignoresSafeArea()
 
             TabView(selection: $selectedID) {
                 ForEach(items) { item in
-                    ZoomableGalleryPage(image: item.cover.image) {
-                        withAnimation(.easeInOut(duration: 0.22)) {
-                            chromeVisible.toggle()
-                        }
-                    }
+                    ZoomableGalleryPage(
+                        image: item.cover.image,
+                        onSingleTap: {
+                            withAnimation(.easeInOut(duration: 0.22)) {
+                                chromeVisible.toggle()
+                            }
+                        },
+                        onDismissProgress: { dismissDrag = $0 },
+                        onDismissCommit: { dismiss() }
+                    )
                     .tag(item.id)
                 }
             }
@@ -42,8 +52,8 @@ struct GalleryPreviewView: View {
             .ignoresSafeArea()
 
             chromeOverlay
-                .opacity(chromeVisible ? 1 : 0)
-                .allowsHitTesting(chromeVisible)
+                .opacity(chromeVisible ? 1 - dismissDrag : 0)
+                .allowsHitTesting(chromeVisible && dismissDrag < 0.02)
         }
         .preferredColorScheme(.dark)
         .statusBarHidden(!chromeVisible)
@@ -332,17 +342,26 @@ struct GalleryPreviewView: View {
 
 /// Photos-style pinch / pan / double-tap via UIScrollView. Zoom state lives
 /// entirely in UIKit so pan ticks never re-render gallery chrome. At 1×,
-/// scrolling is disabled so TabView can page horizontally.
+/// scrolling is disabled so TabView can page horizontally; a downward pan
+/// drags a host view off (not the zoomed image) and dismisses.
 private struct ZoomableGalleryPage: View {
     let image: UIImage
     var onSingleTap: () -> Void
+    var onDismissProgress: (CGFloat) -> Void
+    var onDismissCommit: () -> Void
     @State private var bridge = ZoomableScrollBridge()
 
     var body: some View {
-        ZoomableScrollView(image: image, onSingleTap: onSingleTap, bridge: bridge)
-            .onDisappear {
-                bridge.view?.resetZoom(animated: false)
-            }
+        ZoomableScrollView(
+            image: image,
+            onSingleTap: onSingleTap,
+            onDismissProgress: onDismissProgress,
+            onDismissCommit: onDismissCommit,
+            bridge: bridge
+        )
+        .onDisappear {
+            bridge.view?.resetZoom(animated: false)
+        }
     }
 }
 
@@ -353,11 +372,15 @@ private final class ZoomableScrollBridge {
 private struct ZoomableScrollView: UIViewRepresentable {
     let image: UIImage
     var onSingleTap: () -> Void
+    var onDismissProgress: (CGFloat) -> Void
+    var onDismissCommit: () -> Void
     let bridge: ZoomableScrollBridge
 
     func makeUIView(context: Context) -> ZoomableScrollUIView {
         let view = ZoomableScrollUIView()
         view.onSingleTap = onSingleTap
+        view.onDismissProgress = onDismissProgress
+        view.onDismissCommit = onDismissCommit
         view.setImage(image)
         bridge.view = view
         return view
@@ -365,37 +388,59 @@ private struct ZoomableScrollView: UIViewRepresentable {
 
     func updateUIView(_ uiView: ZoomableScrollUIView, context: Context) {
         uiView.onSingleTap = onSingleTap
+        uiView.onDismissProgress = onDismissProgress
+        uiView.onDismissCommit = onDismissCommit
         uiView.setImage(image)
         bridge.view = uiView
     }
 }
 
 /// UIScrollView zoom host — same interaction model as the system Photos viewer.
-private final class ZoomableScrollUIView: UIScrollView, UIScrollViewDelegate {
+/// Dismiss drag lives on `dismissHost`, not the zoomed image: UIScrollView
+/// owns `imageView.transform` for pinch-zoom, and SwiftUI relayouts this
+/// representable on every progress tick. Transforming either of those
+/// resets the photo to the top of the page mid-drag.
+private final class ZoomableScrollUIView: UIView, UIScrollViewDelegate, UIGestureRecognizerDelegate {
     var onSingleTap: (() -> Void)?
+    var onDismissProgress: ((CGFloat) -> Void)?
+    var onDismissCommit: (() -> Void)?
 
+    private let dismissHost = UIView()
+    private let scrollView = UIScrollView()
     private let imageView = UIImageView()
     private var currentImage: UIImage?
     private var lastLayoutSize: CGSize = .zero
+    private var linkedPagerPan = false
+    private var dismissInFlight = false
 
     private let maxZoom: CGFloat = 4
     private let doubleTapZoom: CGFloat = 2.5
+    private let dismissPan = UIPanGestureRecognizer()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        delegate = self
-        showsHorizontalScrollIndicator = false
-        showsVerticalScrollIndicator = false
-        bouncesZoom = true
-        decelerationRate = .fast
-        contentInsetAdjustmentBehavior = .never
         backgroundColor = .clear
+        clipsToBounds = false
+
+        dismissHost.backgroundColor = .clear
+        dismissHost.clipsToBounds = false
+        addSubview(dismissHost)
+
+        scrollView.delegate = self
+        scrollView.showsHorizontalScrollIndicator = false
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.bouncesZoom = true
+        scrollView.decelerationRate = .fast
+        scrollView.contentInsetAdjustmentBehavior = .never
+        scrollView.backgroundColor = .clear
+        scrollView.clipsToBounds = false
         // At 1×, leave horizontal swipes to the parent TabView page gesture.
-        isScrollEnabled = false
+        scrollView.isScrollEnabled = false
+        dismissHost.addSubview(scrollView)
 
         imageView.contentMode = .scaleAspectFit
         imageView.isUserInteractionEnabled = true
-        addSubview(imageView)
+        scrollView.addSubview(imageView)
 
         let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
         doubleTap.numberOfTapsRequired = 2
@@ -405,6 +450,12 @@ private final class ZoomableScrollUIView: UIScrollView, UIScrollViewDelegate {
         singleTap.numberOfTapsRequired = 1
         singleTap.require(toFail: doubleTap)
         addGestureRecognizer(singleTap)
+
+        dismissPan.addTarget(self, action: #selector(handleDismissPan(_:)))
+        dismissPan.delegate = self
+        dismissPan.maximumNumberOfTouches = 1
+        addGestureRecognizer(dismissPan)
+        scrollView.panGestureRecognizer.require(toFail: dismissPan)
     }
 
     @available(*, unavailable)
@@ -421,17 +472,41 @@ private final class ZoomableScrollUIView: UIScrollView, UIScrollViewDelegate {
     }
 
     func resetZoom(animated: Bool) {
-        guard zoomScale != minimumZoomScale || contentOffset != .zero else {
-            isScrollEnabled = false
+        dismissInFlight = false
+        dismissHost.transform = .identity
+        dismissHost.alpha = 1
+        onDismissProgress?(0)
+        guard scrollView.zoomScale != scrollView.minimumZoomScale
+                || scrollView.contentOffset != .zero else {
+            scrollView.isScrollEnabled = false
             return
         }
-        setZoomScale(minimumZoomScale, animated: animated)
-        isScrollEnabled = false
+        scrollView.setZoomScale(scrollView.minimumZoomScale, animated: animated)
+        scrollView.isScrollEnabled = false
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil, !linkedPagerPan else { return }
+        var ancestor: UIView? = superview
+        while let view = ancestor {
+            if let scroll = view as? UIScrollView, scroll !== scrollView {
+                scroll.panGestureRecognizer.require(toFail: dismissPan)
+                linkedPagerPan = true
+                break
+            }
+            ancestor = view.superview
+        }
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
         guard bounds.size.width > 0, bounds.size.height > 0 else { return }
+        // Setting `frame` while a dismiss transform is on the host jumps the
+        // photo back to its laid-out origin (the top / centered slot).
+        if dismissInFlight { return }
+        dismissHost.frame = bounds
+        scrollView.frame = dismissHost.bounds
         if bounds.size != lastLayoutSize {
             lastLayoutSize = bounds.size
             configureForCurrentImage()
@@ -444,32 +519,35 @@ private final class ZoomableScrollUIView: UIScrollView, UIScrollViewDelegate {
         let imageSize = image.size
         guard imageSize.width > 0, imageSize.height > 0 else { return }
 
-        // Fitted size at scale 1 — aspect-fit inside the page.
-        let fit = min(bounds.width / imageSize.width, bounds.height / imageSize.height)
+        let boundsSize = scrollView.bounds.size
+        let fit = min(boundsSize.width / imageSize.width, boundsSize.height / imageSize.height)
         let fitted = CGSize(width: imageSize.width * fit, height: imageSize.height * fit)
 
-        zoomScale = 1
-        minimumZoomScale = 1
-        maximumZoomScale = maxZoom
+        scrollView.zoomScale = 1
+        scrollView.minimumZoomScale = 1
+        scrollView.maximumZoomScale = maxZoom
         imageView.frame = CGRect(origin: .zero, size: fitted)
-        contentSize = fitted
-        contentOffset = .zero
-        isScrollEnabled = false
+        scrollView.contentSize = fitted
+        scrollView.contentOffset = .zero
+        scrollView.isScrollEnabled = false
         centerImage()
     }
 
     private func centerImage() {
-        let boundsSize = bounds.size
-        var frame = imageView.frame
-
-        frame.origin.x = frame.size.width < boundsSize.width
-            ? (boundsSize.width - frame.size.width) / 2
-            : 0
-        frame.origin.y = frame.size.height < boundsSize.height
-            ? (boundsSize.height - frame.size.height) / 2
-            : 0
-
-        imageView.frame = frame
+        let boundsSize = scrollView.bounds.size
+        let imageSize = imageView.frame.size
+        var inset = UIEdgeInsets.zero
+        if imageSize.width < boundsSize.width {
+            let pad = (boundsSize.width - imageSize.width) / 2
+            inset.left = pad
+            inset.right = pad
+        }
+        if imageSize.height < boundsSize.height {
+            let pad = (boundsSize.height - imageSize.height) / 2
+            inset.top = pad
+            inset.bottom = pad
+        }
+        scrollView.contentInset = inset
     }
 
     // MARK: UIScrollViewDelegate
@@ -480,7 +558,7 @@ private final class ZoomableScrollUIView: UIScrollView, UIScrollViewDelegate {
 
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
         centerImage()
-        isScrollEnabled = zoomScale > minimumZoomScale + 0.01
+        scrollView.isScrollEnabled = scrollView.zoomScale > scrollView.minimumZoomScale + 0.01
     }
 
     func scrollViewDidEndZooming(
@@ -488,9 +566,9 @@ private final class ZoomableScrollUIView: UIScrollView, UIScrollViewDelegate {
         with view: UIView?,
         atScale scale: CGFloat
     ) {
-        if scale <= minimumZoomScale + 0.05 {
-            setZoomScale(minimumZoomScale, animated: true)
-            isScrollEnabled = false
+        if scale <= scrollView.minimumZoomScale + 0.05 {
+            scrollView.setZoomScale(scrollView.minimumZoomScale, animated: true)
+            scrollView.isScrollEnabled = false
         }
     }
 
@@ -500,15 +578,67 @@ private final class ZoomableScrollUIView: UIScrollView, UIScrollViewDelegate {
         onSingleTap?()
     }
 
+    @objc private func handleDismissPan(_ gesture: UIPanGestureRecognizer) {
+        let translation = gesture.translation(in: self)
+        switch gesture.state {
+        case .began, .changed:
+            dismissInFlight = true
+            let y = max(0, translation.y)
+            let x = translation.x * 0.35
+            let scale = max(0.88, 1 - y / 1600)
+            dismissHost.transform = CGAffineTransform(translationX: x, y: y).scaledBy(x: scale, y: scale)
+            onDismissProgress?(min(1, y / 260))
+        case .ended, .cancelled:
+            let y = max(0, translation.y)
+            let velocity = gesture.velocity(in: self).y
+            if y > 140 || velocity > 1100 {
+                let x = translation.x * 0.35
+                UIView.animate(withDuration: 0.2, delay: 0, options: .curveEaseIn) {
+                    self.dismissHost.transform = CGAffineTransform(translationX: x, y: y + 420)
+                    self.dismissHost.alpha = 0
+                } completion: { _ in
+                    self.onDismissProgress?(1)
+                    self.onDismissCommit?()
+                }
+            } else {
+                UIView.animate(
+                    withDuration: 0.32,
+                    delay: 0,
+                    usingSpringWithDamping: 0.84,
+                    initialSpringVelocity: 0.4,
+                    options: .allowUserInteraction
+                ) {
+                    self.dismissHost.transform = .identity
+                } completion: { _ in
+                    self.dismissInFlight = false
+                    self.setNeedsLayout()
+                }
+                onDismissProgress?(0)
+            }
+        default:
+            break
+        }
+    }
+
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === dismissPan else { return true }
+        guard scrollView.zoomScale <= scrollView.minimumZoomScale + 0.01 else { return false }
+        let velocity = dismissPan.velocity(in: self)
+        let translation = dismissPan.translation(in: self)
+        let dy = abs(velocity.y) > 40 ? velocity.y : translation.y
+        let dx = abs(velocity.y) > 40 ? velocity.x : translation.x
+        return dy > 0 && abs(dy) > abs(dx)
+    }
+
     @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
-        if zoomScale > minimumZoomScale + 0.01 {
-            setZoomScale(minimumZoomScale, animated: true)
-            isScrollEnabled = false
+        if scrollView.zoomScale > scrollView.minimumZoomScale + 0.01 {
+            scrollView.setZoomScale(scrollView.minimumZoomScale, animated: true)
+            scrollView.isScrollEnabled = false
             return
         }
 
         let point = gesture.location(in: imageView)
-        let size = bounds.size
+        let size = scrollView.bounds.size
         let width = size.width / doubleTapZoom
         let height = size.height / doubleTapZoom
         let rect = CGRect(
@@ -517,7 +647,7 @@ private final class ZoomableScrollUIView: UIScrollView, UIScrollViewDelegate {
             width: width,
             height: height
         )
-        zoom(to: rect, animated: true)
-        isScrollEnabled = true
+        scrollView.zoom(to: rect, animated: true)
+        scrollView.isScrollEnabled = true
     }
 }

@@ -25,32 +25,6 @@ class ReferencesViewModel: ObservableObject {
     /// the user picked. Fully offline — the images ship in Assets.xcassets
     /// (see SampleReferencePack for provenance).
     func importSamplePack(into appState: AppState) {
-        Task {
-            var importedAny = false
-            for name in SampleReferencePack.assetNames {
-                // Decode + re-encode off the main actor; assets are catalog
-                // JPEGs, so this is the one full-res pass per sample.
-                guard let pair = await Task.detached(priority: .utility, operation: {
-                    guard
-                        let image = UIImage(named: name),
-                        let data = image.jpegData(compressionQuality: 0.92),
-                        let raw = UIImage(data: data)
-                    else { return nil as (Data, UIImage)? }
-                    return (data, raw)
-                }).value else {
-                    #if DEBUG
-                    print("SampleReferencePack: missing asset \(name)")
-                    #endif
-                    continue
-                }
-                importedAny = true
-                appState.importReference(raw: pair.1, data: pair.0)
-            }
-            if !importedAny {
-                await MainActor.run {
-                    appState.showTransientNotice("Couldn't load sample photos")
-                }
-            }
-        }
+        appState.importBundledSamples()
     }
 }

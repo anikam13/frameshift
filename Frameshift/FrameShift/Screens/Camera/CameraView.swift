@@ -57,6 +57,9 @@ struct CameraView: View {
             .fullScreenCover(item: $galleryStart) { shot in
                 GalleryPreviewView(selectedID: shot.id)
                     .environmentObject(appState)
+                    // Clear so a drag-down dismiss can reveal the camera
+                    // underneath, like Photos.
+                    .presentationBackground(.clear)
             }
             .onChange(of: appState.hasReferences) { _, has in
                 if has { hasSeenReferenceHint = true }

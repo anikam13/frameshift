@@ -98,6 +98,8 @@ nonisolated struct VisionAnalyzer {
         )
 
         let recommendedZoom = inferZoom(exif: exif, subjectBox: body, faceBox: faceBox)
+        let coverage = bodyCoverage(from: pose)
+        let look = angleLook(from: pose, imageSize: pixelSize)
 
         return ShotSpec(
             subjectTop: body.top, subjectLeft: body.left,
@@ -120,6 +122,8 @@ nonisolated struct VisionAnalyzer {
             rollConfidence: rollConfidence,
             rollSource: rollSource,
             recommendedZoom: recommendedZoom,
+            bodyCoverage: coverage,
+            angleLook: look,
             referenceSize: CGSize(width: image.size.width, height: image.size.height)
         )
     }
@@ -281,13 +285,12 @@ nonisolated struct VisionAnalyzer {
 
     // MARK: Zoom
 
-    /// EXIF focal is the strongest signal; face fill is more robust than body
-    /// fill for cropped web references (FR-11); body fill is the last resort.
-    /// The fill heuristics never recommend 0.5×: a small face/body can mean an
-    /// ultra-wide lens *or* a distant subject (full-body framing at a normal
-    /// lens), and the two are indistinguishable without focal metadata — which
-    /// most web references have stripped. 1× is the safe guess.
+    /// EXIF focal is the only reliable zoom signal. Face/body fill used to
+    /// map a large head to 2×/3×, which tagged arm's-length selfies as zoomed
+    /// in. Without focal metadata, 1× is the safe guess — same rationale as
+    /// never recommending 0.5× from fill alone.
     private func inferZoom(exif: ReferenceEXIF, subjectBox: NormBox, faceBox: NormBox?) -> CGFloat {
+        if exif.isFrontCamera { return 1 }
         if let focal = exif.focalLength35mm {
             switch focal {
             case ..<20:  return 0.5
@@ -296,18 +299,39 @@ nonisolated struct VisionAnalyzer {
             default:     return 3
             }
         }
-        if let faceBox {
-            switch faceBox.height {
-            case ..<0.15: return 1
-            case ..<0.28: return 2
-            default:      return 3
-            }
+        return 1
+    }
+
+    // MARK: Coverage / angle look
+
+    private func bodyCoverage(from pose: VNHumanBodyPoseObservation?) -> ShotSpec.BodyCoverage {
+        guard let pose else { return .unknown }
+        if point(pose, .leftAnkle) != nil || point(pose, .rightAnkle) != nil { return .feet }
+        if point(pose, .leftKnee) != nil || point(pose, .rightKnee) != nil { return .knees }
+        if point(pose, .leftHip) != nil || point(pose, .rightHip) != nil { return .torso }
+        return .unknown
+    }
+
+    private func angleLook(
+        from pose: VNHumanBodyPoseObservation?,
+        imageSize: CGSize
+    ) -> ShotSpec.AngleLook {
+        guard let pose, imageSize.width > 0, imageSize.height > 0 else { return .none }
+        func span(_ a: VNHumanBodyPoseObservation.JointName, _ b: VNHumanBodyPoseObservation.JointName) -> CGFloat? {
+            guard let pa = point(pose, a), let pb = point(pose, b) else { return nil }
+            let ax = pa.location.x * imageSize.width
+            let ay = (1 - pa.location.y) * imageSize.height
+            let bx = pb.location.x * imageSize.width
+            let by = (1 - pb.location.y) * imageSize.height
+            return hypot(ax - bx, ay - by)
         }
-        switch subjectBox.height {
-        case ..<0.48: return 1
-        case ..<0.72: return 2
-        default:      return 3
-        }
+        let hasAnkles = point(pose, .leftAnkle) != nil || point(pose, .rightAnkle) != nil
+        return ShotSpec.inferAngleLook(
+            shoulderSpan: span(.leftShoulder, .rightShoulder),
+            hipSpan: span(.leftHip, .rightHip),
+            kneeSpan: span(.leftKnee, .rightKnee),
+            hasAnkles: hasAnkles
+        )
     }
 }
 

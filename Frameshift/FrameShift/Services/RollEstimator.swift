@@ -10,7 +10,7 @@ import CoreGraphics
 /// only succeeds when the photo has a visible sky/ground horizon line, which
 /// most portrait references — the common case — don't have. Horizon is
 /// stored for diagnostics / pitch helpers but is never high-trust enough
-/// for Tilted grouping or hard roll coaching (screenshots / web crops).
+/// for hard roll coaching (screenshots / web crops).
 /// nonisolated: import-time only, called from VisionAnalyzer off MainActor.
 nonisolated enum RollEstimator {
 

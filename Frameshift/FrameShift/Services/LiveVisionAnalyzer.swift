@@ -1,11 +1,11 @@
-import Vision
-import CoreVideo
+@preconcurrency import Vision
+@preconcurrency import CoreVideo
 import ImageIO
 
 /// Runs live human detection + body pose on camera frames (~3 fps).
 /// nonisolated: frame callbacks arrive on the capture video queue; Vision
 /// work stays off MainActor (project default isolation is MainActor).
-nonisolated final class LiveVisionAnalyzer {
+nonisolated final class LiveVisionAnalyzer: @unchecked Sendable {
 
     /// One live frame's subject, normalized UIKit coordinates in oriented
     /// buffer space.
@@ -56,6 +56,10 @@ nonisolated final class LiveVisionAnalyzer {
             options: [:]
         )
 
+        // CVPixelBuffer isn't Sendable; the utility hop only reads it under
+        // the lock in estimateLighting, after Vision has already retained it.
+        nonisolated(unsafe) let lightingBuffer = pixelBuffer
+
         // Utility: live pose must not outrank AVCaptureSession / restore analysis.
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self else { return }
@@ -100,7 +104,7 @@ nonisolated final class LiveVisionAnalyzer {
             }
 
             let lighting = subject.box.map {
-                self.estimateLighting(buffer: pixelBuffer, subject: $0)
+                self.estimateLighting(buffer: lightingBuffer, subject: $0)
             } ?? 0.4
             self.publish(subject: subject, lighting: lighting, contentSize: orientedSize)
         }

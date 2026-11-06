@@ -10,6 +10,21 @@ extension UIImage {
     /// Ghost / grid-tier max edge — overlays and cells don't need more.
     nonisolated static let overlayMaxPixelSize: CGFloat = 1024
 
+    /// Longest edge written for an imported reference. Coaching and the
+    /// ghost overlay don't need the original 12MP HEIC.
+    nonisolated static let referenceMaxPixelSize: CGFloat = 1600
+
+    /// JPEG quality for stored references. Captured shots stay at 0.92.
+    nonisolated static let referenceJPEGQuality: CGFloat = 0.72
+
+    /// Downsamples then JPEG-encodes for the reference library.
+    nonisolated func compressedReferenceJPEG(
+        maxPixelSize: CGFloat = UIImage.referenceMaxPixelSize,
+        quality: CGFloat = UIImage.referenceJPEGQuality
+    ) -> Data? {
+        downsampled(maxPixelSize: maxPixelSize).jpegData(compressionQuality: quality)
+    }
+
     /// Decodes a downsampled upright image via ImageIO without materializing
     /// the full-resolution bitmap first. Prefer this over `UIImage(data:)` +
     /// `upright()` when restoring from disk.

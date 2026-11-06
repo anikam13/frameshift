@@ -19,8 +19,6 @@ struct SettingsView: View {
 
     @State private var referenceBytes: Int64 = 0
     @State private var capturedBytes: Int64 = 0
-    @State private var confirmClearReferences = false
-    @State private var confirmClearCaptured = false
     @State private var cameraStatusText = "Checking…"
     @State private var photoStatusText = "Checking…"
     @State private var showOnboardingReplay = false
@@ -76,35 +74,36 @@ struct SettingsView: View {
             LabeledContent("References", value: formatted(referenceBytes))
             LabeledContent("Captured Shots", value: formatted(capturedBytes))
 
-            Button("Clear All References", role: .destructive) {
-                confirmClearReferences = true
-            }
-            .confirmationDialog(
-                "Remove all imported references from FrameShift? This can't be undone.",
-                isPresented: $confirmClearReferences,
-                titleVisibility: .visible
-            ) {
-                Button("Clear All References", role: .destructive) {
-                    appState.clearAllReferences()
-                    Task { await loadStorageSizes() }
+            // Menu, not confirmationDialog / UIAlertController: Settings is
+            // already a sheet, and a nested system present is what made the
+            // first confirm take so long.
+            Menu {
+                Section("Remove all imported references from FrameShift? This can't be undone.") {
+                    Button("Clear All References", role: .destructive) {
+                        appState.clearAllReferences()
+                        Task { await loadStorageSizes() }
+                    }
                 }
-                Button("Cancel", role: .cancel) {}
+            } label: {
+                Text("Clear All References")
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .tint(.red)
+            .menuIndicator(.hidden)
 
-            Button("Clear All Captured Shots", role: .destructive) {
-                confirmClearCaptured = true
-            }
-            .confirmationDialog(
-                "Remove all captured shots from FrameShift? Photos already saved to your camera roll are not affected.",
-                isPresented: $confirmClearCaptured,
-                titleVisibility: .visible
-            ) {
-                Button("Clear All Captured Shots", role: .destructive) {
-                    appState.clearAllCapturedShots()
-                    Task { await loadStorageSizes() }
+            Menu {
+                Section("Remove all captured shots from FrameShift? Photos already saved to your camera roll are not affected.") {
+                    Button("Clear All Captured Shots", role: .destructive) {
+                        appState.clearAllCapturedShots()
+                        Task { await loadStorageSizes() }
+                    }
                 }
-                Button("Cancel", role: .cancel) {}
+            } label: {
+                Text("Clear All Captured Shots")
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .tint(.red)
+            .menuIndicator(.hidden)
         } header: {
             Text("Storage")
         }

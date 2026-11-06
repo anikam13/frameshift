@@ -1,61 +1,44 @@
 import SwiftUI
+import UIKit
 
-/// First-launch onboarding: four swipeable pages introducing the
-/// reference → guided-framing → tips loop. Shown once; completion
-/// is persisted so it never reappears after the user finishes it.
+/// First-launch onboarding: welcome scrolls up into choose-a-reference,
+/// then the coach loop on that photo.
 struct OnboardingView: View {
     /// True when reached via Settings' "Replay Onboarding" rather than the
     /// mandatory first-launch flow — adds a close button and dismisses via
     /// the environment instead of relying on the app root's if/else swap.
     var isReplay: Bool = false
 
+    @EnvironmentObject private var appState: AppState
     @AppStorage("frameshift.hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @Environment(\.dismiss) private var dismiss
+    /// Remaining-loop page (0 choose reference, 1 coach).
     @State private var page = 0
-    /// Blocks stacked Next taps — TabView page changes plus withAnimation
-    /// were racing and freezing the carousel on double-tap.
+    @State private var hasLeftWelcome = false
+    @State private var selectedSample = OnboardingReferenceChoices.featured
+    /// Blocks stacked Next taps while the page transition is in flight.
     @State private var isAdvancing = false
+    /// Fires the chooser intro after the welcome slide has finished.
+    @State private var chooseIntroReady = false
 
-    private let pageCount = 4
+    private let pageCount = 2
+    private let pageSlide = Animation.timingCurve(0.22, 1.0, 0.36, 1.0, duration: 0.62)
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                TabView(selection: $page) {
-                    OnboardingWelcomePage().tag(0)
-                    // Prefetch only the adjacent image page so cold start
-                    // doesn't decode every onboarding asset up front.
-                    Group {
-                        if page >= 1 {
-                            OnboardingReferencesPage()
-                        } else {
-                            Color.clear
-                        }
-                    }
-                    .tag(1)
-                    Group {
-                        if page >= 2 {
-                            OnboardingCameraPage()
-                        } else {
-                            Color.clear
-                        }
-                    }
-                    .tag(2)
-                    OnboardingComparePage().tag(3)
-                }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .disabled(isAdvancing)
+            GeometryReader { geo in
+                VStack(spacing: 0) {
+                    OnboardingWelcomePage(onGetStarted: leaveWelcome)
+                        .frame(width: geo.size.width, height: geo.size.height)
 
-                dots
-                    .padding(.bottom, 18)
-                actionButton
-                    .frame(height: 54)
-                    .padding(.bottom, 24)
-                    .disabled(isAdvancing)
-                    .opacity(isAdvancing ? 0.7 : 1)
+                    remaining
+                        .frame(width: geo.size.width, height: geo.size.height)
+                }
+                .offset(y: hasLeftWelcome ? -geo.size.height : 0)
             }
+            .clipped()
 
             if isReplay {
                 VStack {
@@ -68,7 +51,7 @@ struct OnboardingView: View {
                                 .frame(width: 36, height: 36)
                                 .background(.ultraThinMaterial, in: Circle())
                         }
-                        .padding(.trailing, 20)
+                        .padding(.trailing, 24)
                     }
                     Spacer()
                 }
@@ -76,7 +59,48 @@ struct OnboardingView: View {
             }
         }
         .preferredColorScheme(.dark)
-        .animation(nil, value: isAdvancing)
+    }
+
+    private var remaining: some View {
+        VStack(spacing: 0) {
+            GeometryReader { geo in
+                ZStack {
+                    if hasLeftWelcome {
+                        OnboardingChoosePage(
+                            selectedAsset: $selectedSample,
+                            playIntro: chooseIntroReady
+                        )
+                            .frame(width: geo.size.width, height: geo.size.height)
+                            .offset(x: page == 0 ? 0 : -geo.size.width)
+                            .animation(pageSlide, value: page)
+                            .allowsHitTesting(page == 0)
+
+                        OnboardingReferencesPage(
+                            imageName: selectedSample.isEmpty
+                                ? OnboardingReferenceChoices.featured
+                                : selectedSample,
+                            isActive: page == 1
+                        )
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .offset(x: page == 0 ? geo.size.width : 0)
+                        .animation(pageSlide, value: page)
+                        .allowsHitTesting(page == 1)
+                    }
+                }
+            }
+            .clipped()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            dots
+                .padding(.bottom, 18)
+            actionButton
+                .frame(height: 54)
+                .padding(.bottom, 24)
+                .disabled(isAdvancing)
+                .opacity(isAdvancing ? 0.7 : 1)
+                .animation(nil, value: isAdvancing)
+                .animation(nil, value: page)
+        }
     }
 
     private var dots: some View {
@@ -87,15 +111,12 @@ struct OnboardingView: View {
                     .frame(width: index == page ? 20 : 7, height: 7)
             }
         }
-        .animation(.snappy(duration: 0.25), value: page)
+        .animation(.timingCurve(0.22, 1.0, 0.36, 1.0, duration: 0.52), value: page)
     }
 
     @ViewBuilder
     private var actionButton: some View {
-        if page == 0 {
-            pillButton(title: "Get Started") { advance() }
-                .padding(.horizontal, 24)
-        } else if page < pageCount - 1 {
+        if page < pageCount - 1 {
             HStack {
                 Spacer()
                 Button { advance() } label: {
@@ -108,7 +129,7 @@ struct OnboardingView: View {
                 .padding(.trailing, 24)
             }
         } else {
-            pillButton(title: "Start Shooting", trailingChevron: true) { finish() }
+            pillButton(title: "Start shooting", trailingChevron: true) { finish() }
                 .padding(.horizontal, 24)
         }
     }
@@ -130,15 +151,30 @@ struct OnboardingView: View {
         }
     }
 
+    private func leaveWelcome() {
+        guard !isAdvancing, !hasLeftWelcome else { return }
+        isAdvancing = true
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(.timingCurve(0.22, 1.0, 0.36, 1.0, duration: 0.72)) {
+            hasLeftWelcome = true
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(740))
+            isAdvancing = false
+            chooseIntroReady = true
+        }
+    }
+
     private func advance() {
         guard !isAdvancing, page < pageCount - 1 else { return }
         isAdvancing = true
+        if selectedSample.isEmpty {
+            selectedSample = OnboardingReferenceChoices.featured
+        }
         UISelectionFeedbackGenerator().selectionChanged()
-        // Page TabView animates selection itself — wrapping in withAnimation
-        // stacked transitions and froze on rapid Next taps.
         page += 1
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(350))
+            try? await Task.sleep(for: .milliseconds(640))
             isAdvancing = false
         }
     }
@@ -147,7 +183,17 @@ struct OnboardingView: View {
         guard !isAdvancing else { return }
         isAdvancing = true
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        importStarterPack()
+        appState.activateBundledSample(named: selectedSample.isEmpty
+            ? OnboardingReferenceChoices.featured
+            : selectedSample)
+        appState.selectedTab = .references
         hasCompletedOnboarding = true
         if isReplay { dismiss() }
+    }
+
+    private func importStarterPack() {
+        let name = selectedSample.isEmpty ? OnboardingReferenceChoices.featured : selectedSample
+        appState.importBundledSamples(preferring: name)
     }
 }
