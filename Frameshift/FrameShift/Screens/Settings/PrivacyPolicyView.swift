@@ -4,8 +4,6 @@ import SwiftUI
 /// both an App Store Connect URL and an easily accessible in-app copy).
 /// Keep this text in sync with PRIVACY.md at the workspace root.
 struct PrivacyPolicyView: View {
-    @Environment(\.dismiss) private var dismiss
-
     private struct Section: Identifiable {
         let title: String
         let body: String
@@ -54,8 +52,7 @@ struct PrivacyPolicyView: View {
     ]
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
+        ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     Text("Last updated: \(lastUpdated)")
                         .font(.subheadline)
@@ -75,15 +72,8 @@ struct PrivacyPolicyView: View {
                     }
                 }
                 .padding()
-            }
-            .navigationTitle("Privacy Policy")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
         }
-        .preferredColorScheme(.dark)
+        .navigationTitle("Privacy Policy")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

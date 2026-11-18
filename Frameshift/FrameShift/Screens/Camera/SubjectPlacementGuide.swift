@@ -1,42 +1,23 @@
 import SwiftUI
 
-/// Face circle mapped with aspect-fit to match the reference ghost.
+/// Guides mode's single fixed target: where the reference's head sits and
+/// how large it appears, mapped aspect-fit to match the reference overlay.
+/// Thin white ring at rest; turns yellow once alignment is confirmed. No
+/// second ring for the detected head (approved spec).
 struct SubjectPlacementGuide: View {
     let spec: ShotSpec
-    let isLocked: Bool
-    var isSatisfied: Bool = false
-
-    // Deliberately translucent so the circle reads as a hint, not a UI frame.
-    private var strokeColor: Color {
-        if isSatisfied { return .boxLocked.opacity(0.35) }
-        return isLocked ? .boxLocked.opacity(0.6) : .white.opacity(0.5)
-    }
+    var isAligned: Bool = false
 
     var body: some View {
         GeometryReader { geo in
-            Canvas { ctx, size in
-                drawGuide(in: size, context: &ctx)
-            }
-            .opacity(isSatisfied ? 0 : 1)
-            .animation(.easeOut(duration: 0.25), value: isSatisfied)
-            .animation(.easeOut(duration: 0.15), value: isLocked)
+            let head = spec.headCircle(in: geo.size)
+            Circle()
+                .strokeBorder(isAligned ? Color.cameraYellow : Color.guideIdle, lineWidth: 1.5)
+                .frame(width: head.radius * 2, height: head.radius * 2)
+                .position(head.center)
+                .animation(.easeOut(duration: 0.25), value: isAligned)
         }
-        // The canvas spans the whole viewfinder; without this it swallows
-        // the tap-to-focus and pinch gestures underneath.
+        // Spans the viewfinder; must not swallow tap-to-focus / pinch.
         .allowsHitTesting(false)
-    }
-
-    private func drawGuide(in size: CGSize, context: inout GraphicsContext) {
-        let style = StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)
-        let head = spec.headCircle(in: size)
-
-        var headPath = Path()
-        headPath.addEllipse(in: CGRect(
-            x: head.center.x - head.radius,
-            y: head.center.y - head.radius,
-            width: head.radius * 2,
-            height: head.radius * 2
-        ))
-        context.stroke(headPath, with: .color(strokeColor), style: style)
     }
 }

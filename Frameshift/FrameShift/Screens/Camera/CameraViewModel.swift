@@ -12,12 +12,81 @@ class CameraViewModel: ObservableObject {
     @Published var isFocused:     Bool = false
     @Published var isLocked:      Bool = false
 
-    // Tool drawer (⋯) toggles, Apple Camera-style.
-    @Published var isDrawerOpen:        Bool = false
+    /// Grid toggle from the ⋯ menu; seeded from the Settings default.
     @Published var isGridVisible:       Bool = true
-    @Published var isLevelVisible:      Bool = true
-    @Published var isHeadCircleVisible: Bool = true
-    @Published var tipsEnabled:         Bool = true
+
+    // MARK: Visual-aid state machine (UX-SPEC §4)
+
+    /// Adaptive starts at Overlay and moves once to Guides after stable person
+    /// detection. Any manual selection ends adaptation for this reference
+    /// phase; re-tapping the active mode enters Clean (not Adaptive).
+    enum AidMode: Equatable {
+        case adaptiveOverlay, adaptiveGuides
+        case manualOverlay, manualGuides, manualClean
+
+        var showsOverlay: Bool { self == .adaptiveOverlay || self == .manualOverlay }
+        var showsGuides: Bool { self == .adaptiveGuides || self == .manualGuides }
+        var isManualOverlay: Bool { self == .manualOverlay }
+        var isManualGuides: Bool { self == .manualGuides }
+    }
+    @Published private(set) var aidMode: AidMode = .adaptiveOverlay
+
+    /// Person seen continuously for this long → adaptive Overlay → Guides.
+    static let stableDetectionDelay: TimeInterval = 1.5
+    private var personSeenSince: Date?
+
+    /// True while live Vision currently sees a subject. Drives
+    /// "Looking for subject" in the coaching pill.
+    @Published private(set) var isSubjectDetected = false
+
+    /// User tapped the coaching pill closed. Session-scoped; survives
+    /// detection drops and reference switches.
+    @Published var isCoachingCollapsed = false
+
+    func toggleOverlayMode() {
+        setAidMode(aidMode == .manualOverlay ? .manualClean : .manualOverlay)
+    }
+
+    func toggleGuidesMode() {
+        setAidMode(aidMode == .manualGuides ? .manualClean : .manualGuides)
+    }
+
+    private func setAidMode(_ mode: AidMode) {
+        UISelectionFeedbackGenerator().selectionChanged()
+        withAnimation(.easeInOut(duration: 0.25)) { aidMode = mode }
+    }
+
+    /// New camera session or new reference: back to adaptive Overlay.
+    private func restartAdaptation() {
+        personSeenSince = nil
+        aidMode = .adaptiveOverlay
+    }
+
+    /// Called on each live-vision update.
+    private func advanceAdaptation(subjectPresent: Bool, now: Date = Date()) {
+        if isSubjectDetected != subjectPresent { isSubjectDetected = subjectPresent }
+        guard subjectPresent else {
+            // Brief dropouts don't reverse an adaptive Guides transition;
+            // they only reset the stability timer while still in Overlay.
+            personSeenSince = nil
+            return
+        }
+        guard aidMode == .adaptiveOverlay else { return }
+        if let since = personSeenSince {
+            if now.timeIntervalSince(since) >= Self.stableDetectionDelay {
+                withAnimation(.easeInOut(duration: 0.4)) { aidMode = .adaptiveGuides }
+            }
+        } else {
+            personSeenSince = now
+        }
+    }
+
+    // MARK: Alignment confirmation
+
+    /// Brief "Looking good" after alignment latches, then the pill reduces
+    /// to a yellow check while alignment holds.
+    @Published private(set) var showsAlignedConfirmation = false
+    private var alignedConfirmationTask: Task<Void, Never>?
 
     @Published var zoomFactor:    CGFloat = 1
     @Published var isFrontCamera: Bool = false
@@ -109,9 +178,6 @@ class CameraViewModel: ObservableObject {
     /// Settings is the only place that changes what a fresh session starts with.
     init() {
         isGridVisible = Self.storedDefault(.gridVisible)
-        isLevelVisible = Self.storedDefault(.levelVisible)
-        isHeadCircleVisible = Self.storedDefault(.headCircleVisible)
-        tipsEnabled = Self.storedDefault(.tipsEnabled)
     }
 
     enum DefaultsKey: String {
@@ -143,12 +209,18 @@ class CameraViewModel: ObservableObject {
 
     func onAppear(spec: ShotSpec?) {
         activeSpec = spec
+        restartAdaptation()
         applySpec(spec)
         camera.configure()
         observeMotion()
         observeCamera()
         observeForeground()
         wireVideoFrames()
+    }
+
+    /// "Continue" on the camera-access explanation: shows the system prompt.
+    func requestCameraAccess() {
+        camera.configure(requestIfNeeded: true)
     }
 
     func onDisappear() {
@@ -173,10 +245,12 @@ class CameraViewModel: ObservableObject {
             levelHapticFired = false
             allClearHapticFired = false
             motion.start()
+            restartAdaptation()   // re-entering the camera is a new guidance phase
         } else {
             motion.stop()
             activeTip = nil
             activeTipKind = nil
+            isSubjectDetected = false
             // Frames stop flowing while inactive (wireVideoFrames gates on
             // this flag) — drop the last detection so re-entry can't coach
             // against a stale subject.
@@ -197,6 +271,8 @@ class CameraViewModel: ObservableObject {
         applySpec(spec)
         compositionProgress = CompositionProgress()
         allClearHapticFired = false
+        endAlignedConfirmation()
+        restartAdaptation()
     }
 
     // MARK: Actions
@@ -367,15 +443,6 @@ class CameraViewModel: ObservableObject {
         }
     }
 
-    func cycleFlash() {
-        switch flashMode {
-        case .off:  flashMode = .auto
-        case .auto: flashMode = .on
-        default:    flashMode = .off
-        }
-        UISelectionFeedbackGenerator().selectionChanged()
-    }
-
     // MARK: Overlay opacity
 
     func overlayOpacity(whenFocused target: Double = 0) -> Double {
@@ -387,8 +454,10 @@ class CameraViewModel: ObservableObject {
         return aspectSatisfied ? 0 : 1
     }
 
-    func showTipBanner(aspectSatisfied: Bool) -> Bool {
-        tipsEnabled && !isFocused && !aspectSatisfied && activeTip != nil
+    /// Binary one-tap flash (approved V2): off ↔ on. Auto is not offered.
+    func toggleFlash() {
+        flashMode = flashMode == .on ? .off : .on
+        UISelectionFeedbackGenerator().selectionChanged()
     }
 
     func updateViewfinderSize(_ size: CGSize) {
@@ -452,6 +521,7 @@ class CameraViewModel: ObservableObject {
             self.liveDetection = subject
             self.liveContentSize = contentSize
             self.lightingScore = lighting
+            self.advanceAdaptation(subjectPresent: subject != nil)
             self.evaluateCoaching()
         }
         camera.onVideoFrame = { [weak self] buffer in
@@ -622,12 +692,33 @@ class CameraViewModel: ObservableObject {
         activeTip = output.tip
         activeTipKind = output.tipKind
 
+        // One subtle haptic + brief confirmation per alignment. allSatisfied
+        // already carries the coach's hysteresis, so this re-arms only after
+        // a real misalignment.
         if output.progress.allSatisfied && !allClearHapticFired {
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
             allClearHapticFired = true
+            beginAlignedConfirmation()
         } else if !output.progress.allSatisfied {
             allClearHapticFired = false
+            endAlignedConfirmation()
         }
 
+    }
+
+    private func beginAlignedConfirmation() {
+        alignedConfirmationTask?.cancel()
+        withAnimation(.easeOut(duration: 0.2)) { showsAlignedConfirmation = true }
+        alignedConfirmationTask = Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.25)) { self.showsAlignedConfirmation = false }
+        }
+    }
+
+    private func endAlignedConfirmation() {
+        alignedConfirmationTask?.cancel()
+        alignedConfirmationTask = nil
+        showsAlignedConfirmation = false
     }
 }

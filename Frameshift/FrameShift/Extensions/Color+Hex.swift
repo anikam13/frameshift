@@ -29,4 +29,17 @@ extension Color {
     static let gridLine     = Color.white.opacity(0.25)
     static let levelNeutral = Color.white.opacity(0.40)
     static let levelLocked  = Color(hex: "#FFD60A")
+
+    // Redesign tokens (Paper: "FrameShift — UX Redesign").
+    /// Raised dark controls on camera chrome: zoom selection, flip button.
+    static let cameraControl     = Color(hex: "#242424")
+    /// Background behind a yellow glyph on a manually selected camera control.
+    static let cameraAccentTint  = Color(hex: "#332B00")
+    /// Translucent coaching pill over the live viewfinder (#000000B8).
+    static let coachPill         = Color.black.opacity(0.72)
+    /// Head-target circle at rest (#FFFFFFE6).
+    static let guideIdle         = Color.white.opacity(0.9)
 }
+
+/// Fixed reference-overlay opacity. Approved spec: no slider, no per-photo value.
+let referenceOverlayOpacity: Double = 0.35

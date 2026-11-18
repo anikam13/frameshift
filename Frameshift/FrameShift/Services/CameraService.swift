@@ -35,7 +35,7 @@ class CameraService: NSObject, ObservableObject {
     /// Called on `videoQueue` with each sampled frame (throttled to ~1 fps by the consumer).
     var onVideoFrame: ((CVPixelBuffer) -> Void)?
 
-    enum AuthorizationState { case unknown, authorized, denied }
+    enum AuthorizationState { case unknown, notDetermined, authorized, denied }
 
     @Published var isRunning = false
     @Published private(set) var authorizationState: AuthorizationState = .unknown
@@ -59,7 +59,9 @@ class CameraService: NSObject, ObservableObject {
     /// Safe to call repeatedly (e.g. on every foreground return): re-resolves
     /// authorization in case it changed in Settings, and setupSession() is
     /// itself a no-op once the session is already running.
-    func configure() {
+    /// `requestIfNeeded: false` never shows the system prompt — the camera
+    /// asks at the point of need, after FrameShift's own explanation (D-28).
+    func configure(requestIfNeeded: Bool = false) {
         observeInterruptions()
         let status = AVCaptureDevice.authorizationStatus(for: .video)
         switch status {
@@ -69,7 +71,10 @@ class CameraService: NSObject, ObservableObject {
             authorizationState = .denied
             return
         case .notDetermined:
-            break
+            guard requestIfNeeded else {
+                authorizationState = .notDetermined
+                return
+            }
         @unknown default:
             authorizationState = .denied
             return

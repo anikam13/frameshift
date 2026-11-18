@@ -1,9 +1,7 @@
 import SwiftUI
 
-/// Native iOS Camera shutter button geometry.
-/// Outer ring: 74pt diameter, translucent gray stroke like the current
-/// Camera app (reads as a soft halo on black, not a hard white line).
-/// Inner fill: 62pt diameter, solid white.
+/// Shutter geometry from the redesign (Paper "Capture controls"):
+/// outer ring 78pt / 3pt white stroke; inner fill 66pt solid white.
 ///
 /// A quick tap fires a single capture. Holding past a short threshold starts
 /// a burst — continuous captures until the finger lifts — matching the
@@ -26,13 +24,13 @@ struct ShutterButton: View {
         ZStack {
             // Outer ring
             Circle()
-                .stroke(isBursting ? Color.cameraYellow : Color.white.opacity(0.3), lineWidth: 4)
-                .frame(width: 74, height: 74)
+                .strokeBorder(isBursting ? Color.cameraYellow : Color.white, lineWidth: 3)
+                .frame(width: 78, height: 78)
 
             // Inner fill
             Circle()
                 .fill(Color.white)
-                .frame(width: 62, height: 62)
+                .frame(width: 66, height: 66)
                 .scaleEffect(isPressed ? 0.88 : 1.0)
                 .animation(.spring(response: 0.12, dampingFraction: 0.7), value: isPressed)
 

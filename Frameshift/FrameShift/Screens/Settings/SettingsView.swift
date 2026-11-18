@@ -2,114 +2,169 @@ import SwiftUI
 import AVFoundation
 import Photos
 
-/// Settings, reachable only from the References tab's toolbar — the camera
-/// screen itself stays free of any settings chrome (CLAUDE.md hard constraint).
+/// Settings (Paper page "06 · Menus and settings"), opened from the gallery
+/// header's `⋯` only — never from the camera (D-3). Permissions, help and
+/// app info; storage lives one level down.
 struct SettingsView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
 
-    // Camera guide defaults (F2) — CameraViewModel reads these at init;
-    // the in-drawer toggle itself never writes back to these keys.
-    @AppStorage(CameraViewModel.DefaultsKey.gridVisible.rawValue) private var defaultGridVisible = true
-    @AppStorage(CameraViewModel.DefaultsKey.levelVisible.rawValue) private var defaultLevelVisible = true
-    @AppStorage(CameraViewModel.DefaultsKey.headCircleVisible.rawValue) private var defaultHeadCircleVisible = true
-    @AppStorage(CameraViewModel.DefaultsKey.tipsEnabled.rawValue) private var defaultTipsEnabled = true
-
-    @AppStorage("frameshift.hasSeenReferenceHint") private var hasSeenReferenceHint = false
-
-    @State private var referenceBytes: Int64 = 0
-    @State private var capturedBytes: Int64 = 0
-    @State private var cameraStatusText = "Checking…"
-    @State private var photoStatusText = "Checking…"
-    @State private var showOnboardingReplay = false
-    @State private var showPrivacyPolicy = false
+    @State private var cameraStatusText = "—"
+    @State private var photoStatusText = "—"
 
     var body: some View {
         NavigationStack {
             List {
-                cameraGuidesSection
-                storageSection
-                permissionsSection
-                onboardingSection
-                aboutSection
+                Section("Permissions") {
+                    LabeledContent("Camera", value: cameraStatusText)
+                    LabeledContent("Save to Photos", value: photoStatusText)
+                    Button {
+                        if let url = URL(string: UIApplication.openSettingsURLString) {
+                            UIApplication.shared.open(url)
+                        }
+                    } label: {
+                        ChevronRow(title: "Open System Settings")
+                    }
+                }
+
+                Section("Help") {
+                    Button {
+                        replayTutorial()
+                    } label: {
+                        ChevronRow(title: "Replay Tutorial")
+                    }
+                    NavigationLink("How to Use") {
+                        HowToUseView(onReplayTutorial: replayTutorial)
+                    }
+                }
+
+                Section("App") {
+                    NavigationLink("Storage") { StorageView() }
+                    NavigationLink("Privacy Policy") { PrivacyPolicyView() }
+                    NavigationLink("About FrameShift") { AboutView() }
+                }
             }
+            .foregroundStyle(.primary)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
+                        .fontWeight(.semibold)
+                        .tint(.primary)
                 }
             }
         }
-        .preferredColorScheme(.dark)
-        .task { await loadStorageSizes() }
         .onAppear { refreshPermissionStatuses() }
-        .fullScreenCover(isPresented: $showOnboardingReplay) {
-            OnboardingView(isReplay: true)
-        }
-        .sheet(isPresented: $showPrivacyPolicy) {
-            PrivacyPolicyView()
+    }
+
+    private func replayTutorial() {
+        FirstUseTour.reset()
+        appState.selectedTab = .references
+        dismiss()
+    }
+
+    private func refreshPermissionStatuses() {
+        cameraStatusText = Self.text(for: AVCaptureDevice.authorizationStatus(for: .video))
+        photoStatusText = Self.text(for: PHPhotoLibrary.authorizationStatus(for: .addOnly))
+    }
+
+    private static func text(for status: AVAuthorizationStatus) -> String {
+        switch status {
+        case .authorized:            return "Allowed"
+        case .denied, .restricted:   return "Off"
+        case .notDetermined:         return "Not Asked"
+        @unknown default:            return "—"
         }
     }
 
-    // MARK: F2 — Camera guide defaults
-
-    private var cameraGuidesSection: some View {
-        Section {
-            Toggle("Level", isOn: $defaultLevelVisible)
-            Toggle("Grid", isOn: $defaultGridVisible)
-            Toggle("Head Circle", isOn: $defaultHeadCircleVisible)
-            Toggle("Composition Tips", isOn: $defaultTipsEnabled)
-        } header: {
-            Text("Camera Guides")
-        } footer: {
-            Text("Sets what a new camera session starts with. The in-camera drawer still lets you toggle these for the current session only.")
+    private static func text(for status: PHAuthorizationStatus) -> String {
+        switch status {
+        case .authorized, .limited:  return "Allowed"
+        case .denied, .restricted:   return "Off"
+        case .notDetermined:         return "Not Asked"
+        @unknown default:            return "—"
         }
     }
+}
 
-    // MARK: F3 — Storage
+/// A plain row with a trailing chevron, for button rows that should read like
+/// navigation rows.
+private struct ChevronRow: View {
+    let title: String
 
-    private var storageSection: some View {
-        Section {
-            LabeledContent("References", value: formatted(referenceBytes))
-            LabeledContent("Captured Shots", value: formatted(capturedBytes))
+    var body: some View {
+        HStack {
+            Text(title).foregroundStyle(.primary)
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
+    }
+}
 
-            // Menu, not confirmationDialog / UIAlertController: Settings is
-            // already a sheet, and a nested system present is what made the
-            // first confirm take so long.
-            Menu {
-                Section("Remove all imported references from FrameShift? This can't be undone.") {
-                    Button("Clear All References", role: .destructive) {
-                        appState.clearAllReferences()
-                        Task { await loadStorageSizes() }
-                    }
-                }
-            } label: {
-                Text("Clear All References")
-                    .frame(maxWidth: .infinity, alignment: .leading)
+// MARK: - Storage
+
+/// App-held copies only: imported references and captured copies. Photos in
+/// Apple Photos are never touched; curated Explore photos stay.
+struct StorageView: View {
+    @EnvironmentObject var appState: AppState
+
+    @State private var referenceBytes: Int64 = 0
+    @State private var capturedBytes: Int64 = 0
+    @State private var confirmClearReferences = false
+    @State private var confirmClearCaptures = false
+
+    var body: some View {
+        List {
+            Section {
+                LabeledContent("References", value: formatted(referenceBytes))
+                LabeledContent("Captured Copies", value: formatted(capturedBytes))
+            } header: {
+                Text("Stored by FrameShift")
+            } footer: {
+                Text("These copies are stored inside FrameShift, separate from Photos.")
             }
-            .tint(.red)
-            .menuIndicator(.hidden)
 
-            Menu {
-                Section("Remove all captured shots from FrameShift? Photos already saved to your camera roll are not affected.") {
-                    Button("Clear All Captured Shots", role: .destructive) {
-                        appState.clearAllCapturedShots()
-                        Task { await loadStorageSizes() }
-                    }
+            Section {
+                Button("Clear Imported References", role: .destructive) {
+                    confirmClearReferences = true
                 }
-            } label: {
-                Text("Clear All Captured Shots")
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                .disabled(appState.importedReferences.isEmpty)
+                Button("Clear Captured Copies", role: .destructive) {
+                    confirmClearCaptures = true
+                }
+                .disabled(appState.capturedShots.isEmpty)
+            } footer: {
+                Text("Photos already saved in Photos stay there. Curated Explore photos remain available.")
             }
-            .tint(.red)
-            .menuIndicator(.hidden)
-        } header: {
-            Text("Storage")
+        }
+        .navigationTitle("Storage")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await loadSizes() }
+        .alert("Clear imported references?", isPresented: $confirmClearReferences) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clear References", role: .destructive) {
+                appState.clearImportedReferences()
+                Task { await loadSizes() }
+            }
+        } message: {
+            Text("This removes imported references from FrameShift. Originals stay in Photos.")
+        }
+        .alert("Clear captured copies?", isPresented: $confirmClearCaptures) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clear Copies", role: .destructive) {
+                appState.clearAllCapturedShots()
+                Task { await loadSizes() }
+            }
+        } message: {
+            Text("This empties session review in FrameShift. Photos saved in Photos stay there.")
         }
     }
 
-    private func loadStorageSizes() async {
+    private func loadSizes() async {
         let sizes = await Task.detached(priority: .utility) {
             (ReferenceStore().totalSizeBytes(), CapturedStore().totalSizeBytes())
         }.value
@@ -120,76 +175,111 @@ struct SettingsView: View {
     private func formatted(_ bytes: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
+}
 
-    // MARK: F4 — Permissions
+// MARK: - How to Use
 
-    private var permissionsSection: some View {
-        Section {
-            LabeledContent("Camera", value: cameraStatusText)
-            LabeledContent("Photos", value: photoStatusText)
-            Button("Open System Settings") {
-                if let url = URL(string: UIApplication.openSettingsURLString) {
-                    UIApplication.shared.open(url)
+struct HowToUseView: View {
+    var onReplayTutorial: () -> Void
+
+    private let steps: [(String, String)] = [
+        ("Choose a reference", "Browse Explore or import a photo with +. Your imports appear in Yours."),
+        ("Frame the shot", "Use the person-only overlay or Guides. Follow one coaching tip at a time."),
+        ("Take photos", "Tap once or hold for a burst. Successful saves go to Photos automatically."),
+        ("Review and compare", "Open the session thumbnail to compare, share or add captures as references."),
+    ]
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                VStack(spacing: 0) {
+                    ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(step.0)
+                                .font(.system(size: 17, weight: .semibold))
+                            Text(step.1)
+                                .font(.system(size: 15))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                        if index < steps.count - 1 {
+                            Divider().padding(.leading, 16)
+                        }
+                    }
                 }
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color(.secondarySystemGroupedBackground))
+                )
+
+                Button(action: onReplayTutorial) {
+                    Text("Replay Tutorial")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Color(.systemBackground))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(Capsule().fill(Color.primary))
+                }
+                .buttonStyle(.plain)
             }
-        } header: {
-            Text("Permissions")
+            .padding(16)
         }
+        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .navigationTitle("How to Use")
+        .navigationBarTitleDisplayMode(.inline)
     }
+}
 
-    private func refreshPermissionStatuses() {
-        cameraStatusText = Self.text(for: AVCaptureDevice.authorizationStatus(for: .video))
-        photoStatusText = Self.text(for: PHPhotoLibrary.authorizationStatus(for: .addOnly))
-    }
+// MARK: - About
 
-    private static func text(for status: AVAuthorizationStatus) -> String {
-        switch status {
-        case .authorized:     return "Authorized"
-        case .denied:         return "Denied"
-        case .restricted:     return "Restricted"
-        case .notDetermined:  return "Not Determined"
-        @unknown default:     return "Unknown"
-        }
-    }
-
-    private static func text(for status: PHAuthorizationStatus) -> String {
-        switch status {
-        case .authorized:     return "Authorized"
-        case .limited:        return "Limited"
-        case .denied:         return "Denied"
-        case .restricted:     return "Restricted"
-        case .notDetermined:  return "Not Determined"
-        @unknown default:     return "Unknown"
-        }
-    }
-
-    // MARK: F5 — Onboarding & hints
-
-    private var onboardingSection: some View {
-        Section {
-            Button("Replay Onboarding") {
-                showOnboardingReplay = true
-            }
-            Button("Show Reference Hint Again") {
-                hasSeenReferenceHint = false
-            }
-        } header: {
-            Text("Onboarding")
-        }
-    }
-
-    // MARK: F6 — About
-
-    private var aboutSection: some View {
-        Section {
-            LabeledContent("Version", value: appVersionString)
-            Text("FrameShift processes everything on-device. Nothing is uploaded or collected.")
-                .font(.footnote)
+struct AboutView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("FrameShift")
+                .font(.system(size: 17))
+            Text("Version \(appVersionString)")
+                .font(.system(size: 17))
                 .foregroundStyle(.secondary)
-            Button("Privacy Policy") { showPrivacyPolicy = true }
-        } header: {
-            Text("About")
+                .padding(.top, 10)
+
+            Capsule()
+                .fill(Color.cameraYellow)
+                .frame(width: 40, height: 4)
+                .padding(.top, 34)
+
+            Text("FrameShift processes everything on-device.")
+                .font(.system(size: 17))
+                .padding(.top, 14)
+            Text("Nothing is uploaded or collected.")
+                .font(.system(size: 17))
+                .foregroundStyle(.secondary)
+                .padding(.top, 8)
+
+            NavigationLink {
+                PrivacyPolicyView()
+            } label: {
+                HStack {
+                    Text("Privacy Policy").foregroundStyle(.primary)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 14)
+                .overlay(alignment: .bottom) { Divider() }
+            }
+            .padding(.top, 96)
+
+            Spacer()
         }
+        .padding(.horizontal, 24)
+        .padding(.top, 30)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .navigationTitle("About")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private var appVersionString: String {

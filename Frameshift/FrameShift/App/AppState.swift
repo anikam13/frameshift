@@ -25,7 +25,7 @@ class AppState: ObservableObject {
     @Published var filterPresets: [CustomFilterPreset] = []
 
     // Camera is the default mode; the REFERENCE · CAMERA pill switches this.
-    @Published var selectedTab: Tab = .camera
+    @Published var selectedTab: Tab = .references
 
     /// True while import/restore Vision work is in flight. Camera pauses live
     /// subject detection against this so preview isn't starved.
@@ -48,10 +48,6 @@ class AppState: ObservableObject {
     @Published var photoLibraryDeniedNoticeVisible = false
     private var hasShownPhotoLibraryDeniedNotice = false
 
-    /// Restore finished during first-launch onboarding — analyze after the
-    /// user reaches the camera so Next taps aren't fighting Neural Engine.
-    private var deferredRestoreAnalysis: (active: UUID, rest: [UUID])?
-
     // General-purpose ephemeral notice (Photos save failed, local save
     // failed, etc.) — shown every time since each is a distinct failure,
     // not a standing state like the Photos-denied notice above.
@@ -68,8 +64,11 @@ class AppState: ObservableObject {
     var hasReferences: Bool { !references.isEmpty }
 
     func addReference(_ photo: ReferencePhoto, imageData: Data) {
+        let hadActive = activeReference != nil
         references.insert(photo, at: 0)
-        activeReferenceIndex = 0   // newest becomes active
+        // Importing doesn't change what the camera is shooting against —
+        // only Recreate / the picker does. Keep the active reference's index.
+        activeReferenceIndex = hadActive ? activeReferenceIndex + 1 : 0
         let id = photo.id
         Task.detached(priority: .utility) { [store] in
             if !store.saveImageData(imageData, id: id) {
@@ -82,7 +81,12 @@ class AppState: ObservableObject {
     /// Shared import path for PhotosPicker and sample pack.
     /// Shows the photo immediately, analyzes from the original (EXIF roll),
     /// and persists a compressed JPEG instead of the source HEIC/PNG.
-    func importReference(raw: UIImage, data: Data, bundledAssetName: String? = nil) {
+    func importReference(
+        raw: UIImage,
+        data: Data,
+        bundledAssetName: String? = nil,
+        onAdded: (@MainActor (UUID) -> Void)? = nil
+    ) {
         let originalData = data
         let assetName = bundledAssetName
         // Decode/downsample off the main actor — sample pack / multi-import
@@ -94,6 +98,7 @@ class AppState: ObservableObject {
             let photoId = await MainActor.run {
                 let photo = ReferencePhoto(image: display, bundledAssetName: assetName)
                 self.addReference(photo, imageData: stored)
+                onAdded?(photo.id)
                 return photo.id
             }
             await self.performVisionWork {
@@ -126,8 +131,14 @@ class AppState: ObservableObject {
     }
 
     func removeReference(id: UUID) {
+        let activeID = activeReference?.id
         references.removeAll { $0.id == id }
-        activeReferenceIndex = max(0, min(activeReferenceIndex, references.count - 1))
+        if let activeID, activeID != id,
+           let index = references.firstIndex(where: { $0.id == activeID }) {
+            activeReferenceIndex = index
+        } else {
+            activeReferenceIndex = max(0, min(activeReferenceIndex, references.count - 1))
+        }
         Task.detached(priority: .utility) { [store] in
             store.deleteImage(id: id)
         }
@@ -140,6 +151,100 @@ class AppState: ObservableObject {
             persistManifest()
             ensureCutoutLoaded(for: id)
         }
+    }
+
+    /// Makes a reference active from a shooting surface (camera picker,
+    /// quick-access row, Recreate) and records the use for "recent" ranking.
+    func useReference(id: UUID) {
+        guard let index = references.firstIndex(where: { $0.id == id }) else { return }
+        references[index].useCount += 1
+        references[index].lastUsedAt = Date()
+        setActiveReference(id: id)   // persists the manifest
+    }
+
+    func setReferenceFavorite(id: UUID, isFavorite: Bool) {
+        guard let index = references.firstIndex(where: { $0.id == id }) else { return }
+        references[index].isFavorite = isFavorite
+        persistManifest()
+    }
+
+    /// One merged row: favorites first (most recently used first), then
+    /// used-but-not-favorite references by recency. No duplicates.
+    var quickAccessReferences: [ReferencePhoto] {
+        let byRecency: (ReferencePhoto, ReferencePhoto) -> Bool = {
+            ($0.lastUsedAt ?? .distantPast) > ($1.lastUsedAt ?? .distantPast)
+        }
+        let favorites = references.filter(\.isFavorite).sorted(by: byRecency)
+        let recents = references
+            .filter { !$0.isFavorite && $0.lastUsedAt != nil }
+            .sorted(by: byRecency)
+        return favorites + recents
+    }
+
+    var curatedReferences: [ReferencePhoto] { references.filter(\.isCurated) }
+    /// Newest import first (`references` is already newest-first).
+    var importedReferences: [ReferencePhoto] { references.filter { !$0.isCurated } }
+
+    // MARK: Capture session
+
+    /// Captures confirmed saved to Apple Photos in the current shooting
+    /// session, newest first. Drives the camera thumbnail's count badge.
+    /// A session ends after `sessionInactivityLimit` without a capture;
+    /// switching references never resets it.
+    @Published private(set) var sessionShotIDs: [UUID] = []
+    private var lastSessionCaptureAt: Date?
+    /// Provisional — the UX spec leaves the exact threshold open.
+    static let sessionInactivityLimit: TimeInterval = 30 * 60
+
+    var sessionSavedCount: Int { sessionShotIDs.count }
+
+    /// Ends a stale session before a new capture lands in it.
+    /// Shots confirmed saved to Photos in the current session, newest first.
+    var sessionShots: [CapturedPhoto] {
+        if let last = lastSessionCaptureAt,
+           Date().timeIntervalSince(last) > Self.sessionInactivityLimit {
+            return []
+        }
+        let ids = Set(sessionShotIDs)
+        return capturedShots.filter { ids.contains($0.id) }
+    }
+
+    /// Ends a stale session when the camera or session gallery appears, so an
+    /// old session's count never greets a new shoot.
+    func endSessionIfStale() {
+        rollSessionIfStale()
+    }
+
+    /// Session Select → Add to References (D-11). Imports each shot's
+    /// full-resolution JPEG through the normal reference pipeline.
+    /// Returns how many were added.
+    @discardableResult
+    func addCapturedShotsAsReferences(ids: [UUID]) async -> Int {
+        var added = 0
+        for id in ids {
+            guard let shot = capturedShots.first(where: { $0.id == id }) else { continue }
+            let full = await loadFullShot(id: id) ?? shot.image
+            guard let pair = await Task.detached(priority: .utility, operation: {
+                guard let data = full.jpegData(compressionQuality: 0.92),
+                      let raw = UIImage(data: data) else { return nil as (Data, UIImage)? }
+                return (data, raw)
+            }).value else { continue }
+            importReference(raw: pair.1, data: pair.0)
+            added += 1
+        }
+        return added
+    }
+
+    private func rollSessionIfStale(now: Date = Date()) {
+        if let last = lastSessionCaptureAt, now.timeIntervalSince(last) > Self.sessionInactivityLimit {
+            sessionShotIDs.removeAll()
+        }
+    }
+
+    private func noteSessionSaved(id: UUID) {
+        rollSessionIfStale()
+        lastSessionCaptureAt = Date()
+        sessionShotIDs.insert(id, at: 0)
     }
 
     /// Loads a persisted ghost cutout on demand (active ref / ghost overlay).
@@ -172,19 +277,13 @@ class AppState: ObservableObject {
             store.loadAll()
         }.value
 
-        let onboardingDone = UserDefaults.standard.bool(
-            forKey: "frameshift.hasCompletedOnboarding"
-        )
-
         if restored.references.isEmpty {
-            // First launch: put the sample pack in the library before
-            // onboarding ends, but hold Vision until Next isn't on screen.
-            guard !onboardingDone else { return }
+            // First launch: the curated Explore set ships in the bundle.
+            // Seed it, then analyze in the background (gallery comes first).
             await seedBundledSamplesIntoLibrary()
             guard !references.isEmpty else { return }
-            activateBundledSample(named: OnboardingReferenceChoices.featured)
             let ids = references.map(\.id)
-            deferredRestoreAnalysis = (ids[activeReferenceIndex], ids.filter { $0 != ids[activeReferenceIndex] })
+            scheduleRestoreAnalysis(activeID: ids[0], queuedIDs: Array(ids.dropFirst()), yieldForCamera: false)
             return
         }
 
@@ -198,7 +297,10 @@ class AppState: ObservableObject {
                 spec: $0.spec,
                 personCutout: nil,
                 analysisFailed: $0.analysisFailed,
-                bundledAssetName: $0.bundledAssetName
+                bundledAssetName: $0.bundledAssetName,
+                isFavorite: $0.isFavorite,
+                useCount: $0.useCount,
+                lastUsedAt: $0.lastUsedAt
             )
         }
         if let activeID = restored.activeID,
@@ -209,6 +311,12 @@ class AppState: ObservableObject {
         }
 
         let activeID = references[activeReferenceIndex].id
+        // Launch routing (design decision D-2): a returning user with a
+        // previously chosen reference goes straight to the camera; everyone
+        // else lands on the gallery.
+        if references.contains(where: { $0.lastUsedAt != nil }) {
+            selectedTab = .camera
+        }
         // Ghost overlay only needs the active cutout on camera entry.
         if restored.references.contains(where: { $0.id == activeID && $0.hasCutoutOnDisk }) {
             ensureCutoutLoaded(for: activeID)
@@ -223,13 +331,7 @@ class AppState: ObservableObject {
         let rest = Array(ordered.dropFirst())
         let first = ordered[0]
 
-        // First-launch onboarding still mounts this restore task — hold Vision
-        // until the user finishes so Next isn't fighting Neural Engine.
-        if onboardingDone {
-            scheduleRestoreAnalysis(activeID: first, queuedIDs: rest, yieldForCamera: true)
-        } else {
-            deferredRestoreAnalysis = (first, rest)
-        }
+        scheduleRestoreAnalysis(activeID: first, queuedIDs: rest, yieldForCamera: true)
     }
 
     /// Writes the bundled sample pack into an empty first-launch library.
@@ -255,17 +357,6 @@ class AppState: ObservableObject {
         guard let index = references.firstIndex(where: { $0.bundledAssetName == named }) else { return }
         activeReferenceIndex = index
         persistManifest()
-    }
-
-    /// Called when first-launch onboarding completes (or is already done).
-    func resumeDeferredAnalysisAfterOnboarding() {
-        guard let deferred = deferredRestoreAnalysis else { return }
-        deferredRestoreAnalysis = nil
-        scheduleRestoreAnalysis(
-            activeID: deferred.active,
-            queuedIDs: deferred.rest,
-            yieldForCamera: true
-        )
     }
 
     private func scheduleRestoreAnalysis(
@@ -355,7 +446,10 @@ class AppState: ObservableObject {
                         ? ShotSpec.analyzerVersion : nil,
                     analysisFailed: photo.analysisFailed ? true : nil,
                     spec: photo.spec,
-                    bundledAssetName: photo.bundledAssetName
+                    bundledAssetName: photo.bundledAssetName,
+                    isFavorite: photo.isFavorite ? true : nil,
+                    useCount: photo.useCount > 0 ? photo.useCount : nil,
+                    lastUsedAt: photo.lastUsedAt
                 )
             }
         ))
@@ -458,6 +552,13 @@ class AppState: ObservableObject {
         references.filter { $0.analysisFailed }
     }
 
+    /// Storage → Clear Imported References. Curated Explore photos stay.
+    func clearImportedReferences() {
+        for photo in importedReferences {
+            removeReference(id: photo.id)
+        }
+    }
+
     /// Settings' "Clear All References" — leaves captured shots untouched.
     func clearAllReferences() {
         let ids = references.map(\.id)
@@ -518,13 +619,47 @@ class AppState: ObservableObject {
             let result = await PhotoLibrarySaver.save(image)
             await MainActor.run {
                 switch result {
-                case .saved:              break
+                // Only a confirmed Photos save counts toward the session —
+                // a failed save must not read as saved.
+                case .saved:              self.noteSessionSaved(id: shot.id)
                 case .deniedOrRestricted: self.notePhotoLibraryDenied()
-                case .failed:             self.showTransientNotice("Couldn't save to your camera roll")
+                case .failed:             self.failedSaveShotID = shot.id
                 }
             }
         }
         return shot.id
+    }
+
+    /// A capture whose Photos save failed; the camera asks Try Again /
+    /// Discard Photo (Paper "Photo save failed").
+    @Published var failedSaveShotID: UUID?
+
+    func retryFailedSave() {
+        guard let id = failedSaveShotID else { return }
+        failedSaveShotID = nil
+        Task {
+            guard let image = await loadFullShot(id: id) ?? capturedShots.first(where: { $0.id == id })?.image
+            else { return }
+            switch await PhotoLibrarySaver.save(image) {
+            case .saved:              noteSessionSaved(id: id)
+            case .deniedOrRestricted: notePhotoLibraryDenied()
+            case .failed:             failedSaveShotID = id
+            }
+        }
+    }
+
+    func discardFailedSave() {
+        guard let id = failedSaveShotID else { return }
+        failedSaveShotID = nil
+        removeCapturedShot(id: id)
+    }
+
+    /// Re-runs Vision for a reference ("Couldn't prepare reference" → Try Again).
+    func retryAnalysis(id: UUID) {
+        guard let index = references.firstIndex(where: { $0.id == id }) else { return }
+        references[index].analysisFailed = false
+        references[index].spec = nil
+        scheduleRestoreAnalysis(activeID: id, queuedIDs: [], yieldForCamera: false)
     }
 
     func removeCapturedShot(id: UUID) {
@@ -616,6 +751,7 @@ class AppState: ObservableObject {
     func clearAllCapturedShots() {
         let ids = capturedShots.map(\.id)
         capturedShots.removeAll()
+        sessionShotIDs.removeAll()
         Task.detached(priority: .utility) { [capturedStore] in
             for id in ids { capturedStore.deleteImage(id: id) }
         }
@@ -641,7 +777,20 @@ class AppState: ObservableObject {
             }
     }
 
+    #if DEBUG
+    private var suppressCapturedPersistence = false
+    #endif
+
     private func persistCapturedManifest() {
+        #if DEBUG
+        if suppressCapturedPersistence { return }
+        #endif
+        // Deleted shots leave the session count too (every removal path
+        // rewrites the manifest, so this is the one choke point).
+        let existing = Set(capturedShots.map(\.id))
+        if sessionShotIDs.contains(where: { !existing.contains($0) }) {
+            sessionShotIDs.removeAll { !existing.contains($0) }
+        }
         let manifest = CapturedStore.Manifest(
             shots: capturedShots.map {
                 .init(
@@ -656,6 +805,27 @@ class AppState: ObservableObject {
     }
 
     #if DEBUG
+    /// Preview hook (`-preview-seed-session`): fakes a capture session from
+    /// the reference photos — three singles and a 6-shot burst — so the
+    /// session gallery can be checked in the Simulator (no camera there).
+    /// In-memory only; captured-shot persistence is suppressed.
+    func seedSessionForPreview() {
+        guard !references.isEmpty else { return }
+        suppressCapturedPersistence = true
+        var shots: [CapturedPhoto] = []
+        let burstID = UUID()
+        for index in 0..<6 {
+            let ref = references[index % references.count]
+            shots.append(CapturedPhoto(image: ref.image, referenceID: ref.id, burstID: burstID))
+        }
+        for ref in references.prefix(3) {
+            shots.append(CapturedPhoto(image: ref.image, referenceID: ref.id))
+        }
+        capturedShots.insert(contentsOf: shots, at: 0)
+        sessionShotIDs = shots.map(\.id)
+        lastSessionCaptureAt = Date()
+    }
+
     /// UI-test hook (`-uitest-seed-references` launch argument): in-memory
     /// references only, no disk writes, no Vision analysis.
     func seedReferencesForUITests(count: Int = 4) {
