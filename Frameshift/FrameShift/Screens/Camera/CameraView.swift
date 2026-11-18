@@ -36,6 +36,9 @@ struct CameraView: View {
 
     var body: some View {
         content
+            // Camera chrome is fixed-size like the system Camera; text that
+            // does scale (coaching, cards, tours) stops at xxxLarge (D-32).
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             .background(Color.black)
             // Gallery follows the system appearance; the camera is always
             // dark (D-30).
@@ -267,6 +270,11 @@ struct CameraView: View {
                 Label("Aspect Ratio", systemImage: "aspectratio")
             }
             .pickerStyle(.menu)
+            #if DEBUG
+            Toggle(isOn: $vm.isEvalHUDVisible) {
+                Label("Coaching Eval", systemImage: "gauge.with.dots.needle.33percent")
+            }
+            #endif
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 18, weight: .regular))
@@ -323,7 +331,7 @@ struct CameraView: View {
                     try? await Task.sleep(for: .milliseconds(250))
                     guard !Task.isCancelled else { return }
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    withAnimation(.easeIn(duration: 0.12)) { showReferencePeek = true }
+                    withAnimation(.easeOut(duration: 0.12)) { showReferencePeek = true }
                 }
             }
             .onEnded { _ in
@@ -370,8 +378,20 @@ struct CameraView: View {
                     .transition(.opacity)
                 }
             }
-            .onAppear { vm.updateViewfinderSize(geo.size) }
+            #if DEBUG
+            .overlay(alignment: .bottomLeading) {
+                if cameraUsable && vm.isEvalHUDVisible {
+                    CoachEvalHUD(eval: vm.eval) { vm.isEvalHUDVisible = false }
+                        .padding(10)
+                }
+            }
+            #endif
+            .onAppear {
+                vm.updateViewfinderSize(geo.size)
+                appState.viewfinderFrame = geo.frame(in: .global)
+            }
             .onChange(of: geo.size) { _, size in vm.updateViewfinderSize(size) }
+            .onChange(of: geo.frame(in: .global)) { _, frame in appState.viewfinderFrame = frame }
         }
     }
 
@@ -410,7 +430,7 @@ struct CameraView: View {
                         .resizable()
                         .frame(width: fitRect.width, height: fitRect.height)
                         .position(x: fitRect.midX, y: fitRect.midY)
-                        .opacity(referenceOverlayOpacity)
+                        .opacity(appState.isRecreateMorphInFlight ? 0 : referenceOverlayOpacity)
                         .allowsHitTesting(false)
                         .transition(.opacity)
                 }
@@ -500,6 +520,38 @@ struct CameraView: View {
         }
         .frame(height: 62)
         .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        // Drag sideways to fine-adjust between lenses (D-22); taps still
+        // select presets.
+        .gesture(
+            DragGesture(minimumDistance: 8)
+                .onChanged { vm.handleZoomScrubChanged(translation: $0.translation.width) }
+                .onEnded { _ in vm.handleZoomScrubEnded() }
+        )
+        .overlay(alignment: .top) {
+            if vm.isZoomScrubbing {
+                Text(zoomLabel(vm.zoomFactor))
+                    .font(.system(size: 13, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.cameraYellow)
+                    .padding(.horizontal, 10)
+                    .frame(height: 24)
+                    .background(Capsule().fill(Color.coachPill))
+                    .offset(y: -22)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.15), value: vm.isZoomScrubbing)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Zoom")
+        .accessibilityValue(zoomLabel(vm.zoomFactor))
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: vm.stepZoom(up: true)
+            case .decrement: vm.stepZoom(up: false)
+            @unknown default: break
+            }
+        }
     }
 
     private func zoomButton(_ level: CGFloat) -> some View {

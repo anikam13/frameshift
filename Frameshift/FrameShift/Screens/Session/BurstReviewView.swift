@@ -19,6 +19,12 @@ struct BurstReviewView: View {
     }
 
     var body: some View {
+        // Text scales with Dynamic Type up to the largest standard size;
+        // fixed-height controls would clip at accessibility sizes (D-32).
+        screen.dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+    }
+
+    private var screen: some View {
         VStack(spacing: 0) {
             topBar
             TabView(selection: $currentID) {
@@ -49,13 +55,13 @@ struct BurstReviewView: View {
     private var topBar: some View {
         ZStack {
             Text(titleText)
-                .font(.system(size: 15, weight: .medium))
+                .font(.system(.subheadline, weight: .medium))
                 .foregroundStyle(.white)
                 .monospacedDigit()
             HStack {
                 Button { dismiss() } label: {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 18, weight: .medium))
+                        .font(.system(.body, weight: .medium))
                         .foregroundStyle(.white)
                         .frame(width: 44, height: 44)
                 }
@@ -90,7 +96,7 @@ struct BurstReviewView: View {
                             .overlay(alignment: .bottomTrailing) {
                                 if shot.isBurstBest {
                                     Image(systemName: "star.fill")
-                                        .font(.system(size: 9))
+                                        .font(.system(.caption2))
                                         .foregroundStyle(.white)
                                         .shadow(radius: 1)
                                         .padding(3)
@@ -125,7 +131,7 @@ struct BurstReviewView: View {
         } label: {
             Label(isCover ? "Cover" : "Set as Cover", systemImage: isCover ? "checkmark" : "")
                 .labelStyle(CoverLabelStyle(showsIcon: isCover))
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(.callout, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
                 .frame(height: 48)

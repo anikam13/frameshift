@@ -10,6 +10,7 @@ import UniformTypeIdentifiers
 struct SessionGalleryView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var isSelecting = false
     @State private var selectedIDs: Set<UUID> = []
@@ -32,10 +33,16 @@ struct SessionGalleryView: View {
     ]
 
     var body: some View {
+        // Text scales with Dynamic Type up to the largest standard size;
+        // fixed-height controls would clip at accessibility sizes (D-32).
+        screen.dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+    }
+
+    private var screen: some View {
         VStack(spacing: 0) {
             header
             Text(subtitle)
-                .font(.system(size: 15))
+                .font(.system(.subheadline))
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 16)
@@ -64,7 +71,7 @@ struct SessionGalleryView: View {
             if let toast {
                 ConfirmationToast(message: toast)
                     .padding(.bottom, isSelecting ? 96 : 28)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .bottom)))
             }
         }
         .animation(.easeOut(duration: 0.2), value: toast)
@@ -91,7 +98,7 @@ struct SessionGalleryView: View {
     private var header: some View {
         ZStack {
             Text(title)
-                .font(.system(size: 20, weight: .bold))
+                .font(.system(.title3, weight: .bold))
                 .foregroundStyle(.primary)
                 .contentTransition(.numericText())
                 .accessibilityAddTraits(.isHeader)
@@ -99,7 +106,7 @@ struct SessionGalleryView: View {
                 if !isSelecting {
                     Button { dismiss() } label: {
                         Image(systemName: "camera")
-                            .font(.system(size: 19))
+                            .font(.system(.body))
                             .foregroundStyle(.primary)
                             .frame(width: 44, height: 44)
                     }
@@ -114,7 +121,7 @@ struct SessionGalleryView: View {
                             selectedIDs = []
                         }
                     }
-                    .font(.system(size: 17))
+                    .font(.system(.body))
                     .foregroundStyle(.primary)
                     .frame(height: 44)
                 }
@@ -145,7 +152,7 @@ struct SessionGalleryView: View {
             .overlay(alignment: .bottomLeading) {
                 if item.isBurst {
                     Label("Burst \(item.shots.count)", systemImage: "square.on.square")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(.caption, weight: .semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 10)
                         .frame(height: 26)
@@ -178,9 +185,9 @@ struct SessionGalleryView: View {
     private var emptyState: some View {
         VStack(spacing: 10) {
             Text("No photos yet")
-                .font(.system(size: 20, weight: .bold))
+                .font(.system(.title3, weight: .bold))
             Text("Photos you take are saved to Apple Photos\nand appear here for this session.")
-                .font(.system(size: 15))
+                .font(.system(.subheadline))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
@@ -201,7 +208,7 @@ struct SessionGalleryView: View {
                 addSelectionToReferences()
             } label: {
                 Text("Add to References")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(.callout, weight: .semibold))
                     .foregroundStyle(enabled ? Color(.systemBackground) : Color.secondary)
                     .frame(maxWidth: .infinity)
                     .frame(height: 48)
@@ -215,7 +222,7 @@ struct SessionGalleryView: View {
                 preview: { _ in SharePreview("FrameShift Photo") }
             ) {
                 Text("Share")
-                    .font(.system(size: 17))
+                    .font(.system(.body))
                     .foregroundStyle(enabled ? Color.primary : Color.secondary)
                     .frame(height: 48)
             }
@@ -262,7 +269,7 @@ struct SelectionMark: View {
             if isSelected {
                 Circle().fill(Color.white).frame(width: 22, height: 22)
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 24))
+                    .font(.system(.title2))
                     .foregroundStyle(Color(.systemBlue))
             } else {
                 Circle()
@@ -281,7 +288,7 @@ struct ConfirmationToast: View {
 
     var body: some View {
         Label(message, systemImage: "checkmark")
-            .font(.system(size: 16, weight: .medium))
+            .font(.system(.callout, weight: .medium))
             .foregroundStyle(.white)
             .padding(.horizontal, 22)
             .frame(height: 52)

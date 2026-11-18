@@ -142,22 +142,22 @@ struct TourOverlay: View {
                 Text("\(number) of \(steps.count)")
                     .monospacedDigit()
             }
-            .font(.system(size: 13))
+            .font(.system(.footnote))
             .foregroundStyle(Color(hex: "#636366"))
 
             Text(step.title)
-                .font(.system(size: 17, weight: .semibold))
+                .font(.system(.body, weight: .semibold))
                 .foregroundStyle(Color(hex: "#1C1C1E"))
                 .padding(.top, 10)
             Text(step.body)
-                .font(.system(size: 15))
+                .font(.system(.subheadline))
                 .foregroundStyle(Color(hex: "#636366"))
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 6)
 
             HStack {
                 Button("Skip Tour") { finish() }
-                    .font(.system(size: 15))
+                    .font(.system(.subheadline))
                     .foregroundStyle(Color(hex: "#1C1C1E"))
                 Spacer()
                 Button {
@@ -166,9 +166,9 @@ struct TourOverlay: View {
                     HStack(spacing: 8) {
                         Text(step.nextTitle)
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.system(.caption, weight: .semibold))
                     }
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(.subheadline, weight: .semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 16)
                     .frame(height: 44)

@@ -17,7 +17,7 @@ struct FrameShiftApp: App {
                 await appState.restoreReferences()
             }
             .task {
-                await appState.restoreCapturedShots()
+                await appState.restoreSessionFromPreviousLaunch()
                 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("-preview-seed-session") {
                     while !appState.hasFinishedRestoringReferences {
@@ -27,7 +27,6 @@ struct FrameShiftApp: App {
                 }
                 #endif
             }
-            .task { await appState.restoreFilterPresets() }
         }
     }
 }

@@ -307,10 +307,17 @@ class CameraService: NSObject, ObservableObject {
             $0.metadataOutputRectConverted(fromLayerRect: $0.bounds)
         }
         sessionQueue.async {
-            if let connection = self.photoOutput.connection(with: .video),
-               connection.isVideoMirroringSupported {
-                connection.automaticallyAdjustsVideoMirroring = false
-                connection.isVideoMirrored = (self.currentPosition == .front)
+            // capturePhoto throws (uncaught NSException) without a live video
+            // connection — session interrupted, not yet running, or no camera
+            // (Simulator). Fail the shot instead of crashing.
+            guard let videoConnection = self.photoOutput.connection(with: .video),
+                  videoConnection.isActive, videoConnection.isEnabled else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            if videoConnection.isVideoMirroringSupported {
+                videoConnection.automaticallyAdjustsVideoMirroring = false
+                videoConnection.isVideoMirrored = (self.currentPosition == .front)
             }
 
             // Match the native Camera app: HEVC, full resolution, Deep Fusion /

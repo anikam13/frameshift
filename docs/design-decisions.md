@@ -55,8 +55,8 @@ interruption restores the current view/session.
 Not in the camera menu.
 
 **D-4 · Resume Camera** — `approved`
-The gallery header shows a subtle Resume Camera while a session is active.
-Exact placement is `provisional`.
+The gallery header shows a subtle Resume Camera while a session is active
+(`AppState.sessionShots` non-empty). Exact placement is `provisional`.
 
 **D-5 · Portrait-only UI** — `approved`
 Landscape references can be imported; landscape camera UI is deferred.
@@ -133,9 +133,8 @@ after meaningful misalignment and realignment.
 (Paper design notes; the UX-SPEC listed it as provisional.) Drift restores
 coaching unless the user explicitly collapsed it.
 
-**D-20 · Reference thumbnail tap = Manual Overlay toggle; chevron = picker** — `provisional`
-This was the spec's recommended rule for an unresolved conflict. Needs a
-discoverability test. Hold-to-peek the full reference is kept from the old app
+**D-20 · Reference thumbnail tap = Manual Overlay toggle; chevron = picker** — `approved` (Nov 18 2026)
+Was the spec's recommended rule for an unresolved conflict; confirmed by the designer. Hold-to-peek the full reference is kept from the old app
 (`implementation`).
 
 **D-21 · Never block the shutter** — `approved`
@@ -160,16 +159,19 @@ stores its reference so comparison still works with several references in one se
 Older photos live in Apple Photos. Implementation impact: see O-2.
 
 **D-26 · Viewer is comparison-first** — `approved`
-Hold the photo → original reference; release → capture. Needs an accessible
-alternative. No filters, editor or Save button.
+Hold the photo → original reference; release → capture. The **Compare**
+button is the accessible alternative (approved; closes O-8). No filters,
+editor or Save button.
 
 ---
 
 ## First use
 
 **D-27 · No onboarding slides; in-app spotlight hints (~3 steps)** — `approved`
-Steps: choose reference → overlay/guides → take photo. Each hint dismisses on the real action.
-Skippable. *Rejected:* the current mandatory carousel.
+Steps: choose reference → overlay/guides → take photo. Skippable.
+*Superseded detail:* "each hint dismisses on the real action" — the Paper V2
+tours (Explore 2 steps, Camera 4 steps, **Next** buttons) are followed instead
+(designer-confirmed Nov 18 2026). *Rejected:* the current mandatory carousel.
 
 **D-28 · Camera permission at point of need** — `approved`
 One short contextual explanation right before the system prompt.
@@ -202,20 +204,23 @@ fill · thumbnail 48pt r8 with 22pt white count badge · sheet radius 24.
 **I-1 · Stable-detection delay = 1.5s** — `implementation`
 Middle of the spec's 1–2s range. `CameraViewModel.stableDetectionDelay`.
 
-**I-2 · Session ends after 30 min without a capture** — `implementation`
-The spec leaves this open (O-1). `AppState.sessionInactivityLimit`.
+**I-2 · Session ends after 30 min without a capture** — `approved` (Nov 18 2026)
+`AppState.sessionInactivityLimit`. Survives the app being closed (I-8).
 
-**I-3 · Re-entering the camera from the gallery restarts Adaptive** — `implementation`
-Treated as a new guidance phase. The spec leaves "when Back ends a guidance
-phase" open (O-1).
+**I-3 · Re-entering the camera from the gallery restarts Adaptive** — `approved` (Nov 18 2026; closes O-1)
+Back to the gallery ends the guidance phase; returning starts again at
+Overlay. The capture session and its count carry on.
 
 **I-4 · Grid + 4:3/16:9 aspect live in the `⋯` menu** — `implementation`
 Neither is in the mockups. Both were kept as secondary options rather than dropped.
 
 **I-5 · Explore = bundled samples, Yours = imports** — `implementation`
-`ReferencePhoto.isCurated` = has `bundledAssetName`. Chips map Full Body /
-Portraits from `ShotSpec.framing`. Seated / Couples / Groups are hidden until
-curated photos carry tags (O-3).
+`ReferencePhoto.isCurated` = has `bundledAssetName`. The curated set is the
+bundled AI-generated (Gemini) photos — approved (O-3). Curated photos carry
+hand tags (`SampleReferencePack.tags`); imports fall back to
+`ShotSpec.framing` for Full Body / Portraits. Chips with no matches hide —
+today Couples / Groups (no such photos yet). Curated photos can be favorited
+but not removed.
 
 **I-6 · Coaching collapse is session-scoped** — `implementation`
 Not persisted across launches.
@@ -226,11 +231,21 @@ too (phase 2): `GalleryHomeView` is layered over the mounted camera.
 
 ## Implementation decisions (phases 2–5, Nov 18 2026)
 
-**I-8 · Session gallery is session-only** — `implementation`
+**I-8 · Captures are session-only; no in-app copies** — `approved` (resolves O-2)
 The camera thumbnail opens `SessionGalleryView` (`AppState.sessionShots`).
-`CapturedStore` still persists copies; the old `Screens/Library/` views
-(`GalleryPreviewView`, `GalleryLibraryView`, filters) and `ExportService` are
-unreachable but not deleted — pending O-2 / O-4.
+`CapturedStore` and capture favorites are removed. Full JPEGs sit in
+`SessionCaptureCache` (Caches dir) only while the session is open — for
+full-size share, Add to References and save retry — with a small manifest so
+an open session comes back if iOS closes the app in the background (D-2).
+On launch a session whose last capture is within 30 min is restored; anything
+older is deleted (as are the old Application Support/Captures store and
+filter presets). Storage settings no longer list captures.
+The old `Screens/Library/` views are deleted.
+
+**I-13 · Filters removed** — `approved` (resolves O-4, per D-26)
+`FilterService`, `FilterPresetStore`, `CustomFilterPreset`, `FilterPresetSheet`
+and their tests are deleted. Preset files from older builds are deleted on
+launch. `ExportService` remains dormant.
 
 **I-9 · Tours replace the onboarding carousel** — `implementation`
 `Screens/Onboarding/` deleted. Tours are shown once each
@@ -245,9 +260,24 @@ Curated tiles never show it (they're vetted; simulator Vision fails on them).
 "Show Reference Hint Again" and the camera guide toggles; guides are now the
 camera's mode buttons.
 
-**I-12 · Not built yet** — `implementation`
-Recreate morph transition (D-29), zoom fine-adjust (D-22). Recreate uses a
-plain cover dismiss.
+**I-12 · Recreate morph, zoom fine-adjust, Dynamic Type** — `implementation`
+- D-29: the preview photo flies to exactly where the overlay draws it
+  (aspect-fit in the viewfinder) on a critically damped spring (0.45s, no
+  bounce — nothing was flung), going semi-transparent in flight. The overlay
+  is held back during the flight (no double exposure), then photo-out and
+  overlay-in cross-fade in one 0.25s ease-out hand-off just before the spring
+  settles (~0.7s total). Reduce Motion → 0.25s cross-fade.
+- Motion rules (from Apple's *Designing Fluid Interfaces* and Emil Kowalski's
+  `emilkowalski/skills` audit): enter/exit = ease-out, never ease-in; on-screen
+  moves = ease-in-out or a no-bounce spring; bounce only after a gesture with
+  momentum; one shared toast transition (fade + rise, fade-only under Reduce
+  Motion).
+- D-22: drag sideways on the zoom row (exponential, left = in) with a live
+  readout and a tick per lens; VoiceOver swipe up/down adjusts.
+- D-32: text uses text styles; screens cap at `.xxxLarge` (fixed-height
+  controls); Settings uncapped; camera chrome glyphs stay fixed like the
+  system Camera. Reduce Motion also drops the toast's slide.
+- Cleanup: onboarding images, `ExportService`, `BoundingBoxOverlay` deleted.
 
 ---
 
@@ -255,11 +285,8 @@ plain cover dismiss.
 
 | # | Question | Blocks |
 |---|---|---|
-| O-1 | Session inactivity threshold; does Back end a guidance phase? | I-2, I-3 |
-| O-2 | Keep the in-app captured-photo store (`CapturedStore`, favorites, library grid) or move to session-only per D-25? | Phase 3 |
-| O-3 | Curated set: which images, how they're tagged (Seated/Couples/Groups), licensing, what actions bundled photos allow (remove?) | Phase 2 |
-| O-4 | Filters (`FilterService`, `FilterPresetSheet`): remove per D-26 or keep somewhere? | Phase 3 |
-| O-5 | Detection: confidence, multiple faces, front camera, non-portrait/group references | Coaching tuning |
-| O-6 | Coaching thresholds and haptic cooldown values | Coaching tuning |
-| O-7 | Photos save-permission UX and retry flow; camera-denied full state — built from the V1 artboards; confirm | Phase 4 |
-| O-8 | Accessible alternative to hold-to-compare | Phase 3 |
+| O-5 | Detection: confidence, multiple faces, front camera, non-portrait/group references | Run `docs/coaching-eval.md` (S1–S9) |
+| O-6 | Coaching thresholds and haptic cooldown values | Run `docs/coaching-eval.md` (T1–T5) |
+
+**Closed Nov 18 2026:** O-1 (I-3), O-2 (I-8), O-3 (I-5), O-4 (I-13), O-7 (save-failure
+and camera-denied states signed off as built), O-8 (Compare button, D-26).

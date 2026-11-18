@@ -18,8 +18,6 @@ App identity: product/target `FrameShift`, bundle ID `com.anirudhkamath.frameshi
 | Level / pitch | CoreMotion — `MotionService` (roll + pitch) |
 | Photo import | PhotosUI — `PhotosPicker` |
 | Photo export / save | Photos — PHPhotoLibrary (add-only) |
-| Export card rendering | CoreGraphics — `ExportService` (dormant: no UI entry point since the gallery export button was removed) |
-| Post-capture filters | CoreImage — `FilterService` presets, reference color match, custom presets from picked photos (`FilterPresetSheet` via gallery wand; persisted by `FilterPresetStore`) |
 | Haptics | UIKit — UIImpactFeedbackGenerator |
 | UI | SwiftUI throughout |
 
@@ -46,16 +44,15 @@ struct ReferencePhoto: Identifiable {
 
 struct CapturedPhoto: Identifiable {
     let id: UUID
-    let image: UIImage          // display-sized; full JPEG on disk
+    let image: UIImage          // display-sized; full JPEG in Photos + session temp cache
     let capturedAt: Date
     let referenceID: UUID?
-    var isFavorite: Bool
     let burstID: UUID?          // shots from one shutter hold share this
     var isBurstBest: Bool       // user-picked cover of its burst group
 }
 ```
 
-Persistence: `ReferenceStore` keeps original import bytes + JSON manifest (per-entry `analyzerVersion`, `spec`, `analysisFailed`) + `{id}.cutout.png`; `CapturedStore` keeps JPEG + manifest (favorites, referenceID). On launch, stores decode **downsampled** images into `AppState` (`UIImage+Downsample`). Full-resolution decode is only for Vision analysis (import / version-mismatch migrate) and export.
+Persistence: `ReferenceStore` keeps original import bytes + JSON manifest (per-entry `analyzerVersion`, `spec`, `analysisFailed`) + `{id}.cutout.png`; captures are **not** persisted in the app (D-25): `AppState.capturedShots` holds only the current session in memory, with full JPEGs + a session manifest in `SessionCaptureCache` (Caches dir). A session still open when iOS closes the app is restored on launch (last capture < 30 min); otherwise the cache is cleared. On launch, `ReferenceStore` decodes **downsampled** images into `AppState` (`UIImage+Downsample`). Full-resolution decode is only for Vision analysis (import / version-mismatch migrate) and full-size share / Add to References from the session cache.
 
 ---
 
@@ -99,9 +96,8 @@ FrameShift/                                 // workspace root
         │   ├── MotionService.swift
         │   ├── SampleReferencePack.swift   // bundled starter refs (Gemini stills)
         │   ├── ReferenceStore.swift
-        │   ├── CapturedStore.swift
+        │   ├── SessionCaptureCache.swift   // temp full-res JPEGs for the open session only
         │   ├── PhotoLibrarySaver.swift     // add-only Photos writes
-        │   └── ExportService.swift         // before/after card + share
         ├── Screens/
         │   ├── Root/RootTabView.swift      // shell → CameraView only
         │   ├── Gallery/                    // GalleryHomeView (home: Explore/Yours), ReferencePreviewView
@@ -109,7 +105,6 @@ FrameShift/                                 // workspace root
         │   ├── Camera/                     // viewfinder, aids, CoachingPill, ReferencePickerSheet, permission/unavailable states
         │   ├── Session/                    // SessionGalleryView, SessionViewerView, BurstReviewView
         │   ├── Shared/FirstUseTour.swift   // spotlight tours (replace onboarding)
-        │   ├── Library/                    // LEGACY, unreachable: GalleryPreviewView, GalleryLibraryView, filters (O-2/O-4)
         │   └── Settings/                   // from gallery `⋯` only
         ├── PrivacyInfo.xcprivacy
         └── Assets.xcassets
@@ -194,7 +189,12 @@ drives the white count badge on the bottom-left thumbnail. A session ends after
 `sessionInactivityLimit` (30 min, provisional) without a capture; reference
 switches never reset it. Deleting a shot removes it from the count.
 
-`BoundingBoxOverlay` exists but is unused.
+Zoom fine-adjust: drag sideways on the zoom row (left = in), haptic tick per lens; VoiceOver adjustable.
+
+### Coaching eval (debug builds only)
+Camera `⋯` → **Coaching Eval** shows live coach signals and event counts
+(`Screens/Camera/CoachEval.swift`). Protocol and pass bar:
+`docs/coaching-eval.md` (resolves O-5 / O-6).
 
 ---
 
@@ -217,14 +217,16 @@ Cold start empty state: "Try sample references" runs 9 bundled Gemini
 `Services/SampleReferencePack.swift`) through the import pipeline. Fully
 offline; the no-network rule holds.
 
-### Capture → persist
+### Capture → save
 1. `CameraService.capturePhoto` → cropped `UIImage`
-2. `AppState.addCapturedShot` inserts display-sized image, writes JPEG to `CapturedStore`, add-only save via `PhotoLibrarySaver`
+2. `AppState.addCapturedShot` inserts display-sized image, writes a temporary JPEG to `SessionCaptureCache`, add-only save via `PhotoLibrarySaver` (failure → Try Again / Discard)
 3. Photos-denied → one-time non-blocking notice with Settings action
 
-### Export card (removed from UI)
-- The gallery's sliders-icon export button was removed — it duplicated the
-  share button. `ExportService` remains in the codebase with no entry point.
+### Recreate
+Preview → **Recreate** sets the reference, switches to the (mounted) camera,
+and morphs the photo onto `AppState.viewfinderFrame`, fading into the overlay
+(D-29). Reduce Motion → cross-fade. The preview cover uses a clear
+presentation background so the camera shows through.
 
 ---
 
@@ -242,7 +244,7 @@ extension Color {
 }
 ```
 
-Typography: always `.system(size:weight:design:)` — never custom font names.
+Typography: SF only, never custom font names. Text uses text styles (`.system(.body, weight: .semibold)`) so it follows Dynamic Type (D-32); screens cap at `.xxxLarge` where fixed-height controls would clip (Settings is uncapped). Fixed `.system(size:)` only for camera chrome and glyphs, like the system Camera.
 
 Shutter: outer ring 78pt / 3pt white stroke; inner fill 66pt.
 
@@ -287,7 +289,7 @@ Import uses the system photo picker (no broad library read). Saving uses add-onl
 | Session saved-photo count badge on the camera thumbnail (UX redesign) | `CameraView.sessionThumbnail`, `AppState.sessionShotIDs` |
 | Camera tool drawer replaced by Overlay/Guides mode buttons + `⋯` menu | `CameraView`, `CameraViewModel.AidMode` |
 | Live subject coaching (beyond static box) | `LiveVisionAnalyzer`, `CompositionCoach` — the green match-scan flourish was later removed |
-| Post-shot recommendations screen | **Not shipped** — before/after export card was gallery-only, then its button was removed as redundant with share (`ExportService` is dormant) |
+| Post-shot recommendations screen | **Not shipped** — the before/after export card and `ExportService` were removed |
 
 Deferred (explicitly post-v1): accounts / paid features — see `accounts-paid-features-prd.md`.
 
@@ -297,7 +299,7 @@ Deferred (explicitly post-v1): accounts / paid features — see `accounts-paid-f
 
 - Never keep a library of full-resolution `UIImage`s in `@Published` arrays for the app lifetime.
 - Restore and in-memory gallery/reference images use `UIImage.downsampled` (ImageIO thumbnails).
-- Full-resolution decode only for: Vision analysis on import / analyzerVersion migrate (temporary), person cutout (then downsample + persist PNG), and export card generation (load from store by id).
+- Full-resolution decode only for: Vision analysis on import / analyzerVersion migrate (temporary), person cutout (then downsample + persist PNG), and full-size share / Add to References (from `SessionCaptureCache`).
 - Burst makes this non-negotiable — a held shutter can create dozens of shots quickly.
 
 ---

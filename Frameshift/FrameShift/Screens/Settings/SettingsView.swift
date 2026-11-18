@@ -98,7 +98,7 @@ private struct ChevronRow: View {
             Text(title).foregroundStyle(.primary)
             Spacer()
             Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(.footnote, weight: .semibold))
                 .foregroundStyle(.tertiary)
         }
         .contentShape(Rectangle())
@@ -107,25 +107,22 @@ private struct ChevronRow: View {
 
 // MARK: - Storage
 
-/// App-held copies only: imported references and captured copies. Photos in
-/// Apple Photos are never touched; curated Explore photos stay.
+/// App-held copies only: imported references. Captures aren't kept in the
+/// app (they live in Apple Photos); curated Explore photos stay.
 struct StorageView: View {
     @EnvironmentObject var appState: AppState
 
     @State private var referenceBytes: Int64 = 0
-    @State private var capturedBytes: Int64 = 0
     @State private var confirmClearReferences = false
-    @State private var confirmClearCaptures = false
 
     var body: some View {
         List {
             Section {
                 LabeledContent("References", value: formatted(referenceBytes))
-                LabeledContent("Captured Copies", value: formatted(capturedBytes))
             } header: {
                 Text("Stored by FrameShift")
             } footer: {
-                Text("These copies are stored inside FrameShift, separate from Photos.")
+                Text("Photos you take are saved to Photos only — FrameShift doesn’t keep copies.")
             }
 
             Section {
@@ -133,12 +130,8 @@ struct StorageView: View {
                     confirmClearReferences = true
                 }
                 .disabled(appState.importedReferences.isEmpty)
-                Button("Clear Captured Copies", role: .destructive) {
-                    confirmClearCaptures = true
-                }
-                .disabled(appState.capturedShots.isEmpty)
             } footer: {
-                Text("Photos already saved in Photos stay there. Curated Explore photos remain available.")
+                Text("Originals stay in Photos. Curated Explore photos remain available.")
             }
         }
         .navigationTitle("Storage")
@@ -153,23 +146,12 @@ struct StorageView: View {
         } message: {
             Text("This removes imported references from FrameShift. Originals stay in Photos.")
         }
-        .alert("Clear captured copies?", isPresented: $confirmClearCaptures) {
-            Button("Cancel", role: .cancel) {}
-            Button("Clear Copies", role: .destructive) {
-                appState.clearAllCapturedShots()
-                Task { await loadSizes() }
-            }
-        } message: {
-            Text("This empties session review in FrameShift. Photos saved in Photos stay there.")
-        }
     }
 
     private func loadSizes() async {
-        let sizes = await Task.detached(priority: .utility) {
-            (ReferenceStore().totalSizeBytes(), CapturedStore().totalSizeBytes())
+        referenceBytes = await Task.detached(priority: .utility) {
+            ReferenceStore().totalSizeBytes()
         }.value
-        referenceBytes = sizes.0
-        capturedBytes = sizes.1
     }
 
     private func formatted(_ bytes: Int64) -> String {
@@ -196,9 +178,9 @@ struct HowToUseView: View {
                     ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
                         VStack(alignment: .leading, spacing: 6) {
                             Text(step.0)
-                                .font(.system(size: 17, weight: .semibold))
+                                .font(.system(.body, weight: .semibold))
                             Text(step.1)
-                                .font(.system(size: 15))
+                                .font(.system(.subheadline))
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -216,10 +198,11 @@ struct HowToUseView: View {
 
                 Button(action: onReplayTutorial) {
                     Text("Replay Tutorial")
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.system(.body, weight: .semibold))
                         .foregroundStyle(Color(.systemBackground))
                         .frame(maxWidth: .infinity)
-                        .frame(height: 52)
+                        .frame(minHeight: 52)
+                        .padding(.vertical, 4)
                         .background(Capsule().fill(Color.primary))
                 }
                 .buttonStyle(.plain)
@@ -238,9 +221,9 @@ struct AboutView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("FrameShift")
-                .font(.system(size: 17))
+                .font(.system(.body))
             Text("Version \(appVersionString)")
-                .font(.system(size: 17))
+                .font(.system(.body))
                 .foregroundStyle(.secondary)
                 .padding(.top, 10)
 
@@ -250,10 +233,10 @@ struct AboutView: View {
                 .padding(.top, 34)
 
             Text("FrameShift processes everything on-device.")
-                .font(.system(size: 17))
+                .font(.system(.body))
                 .padding(.top, 14)
             Text("Nothing is uploaded or collected.")
-                .font(.system(size: 17))
+                .font(.system(.body))
                 .foregroundStyle(.secondary)
                 .padding(.top, 8)
 
@@ -264,7 +247,7 @@ struct AboutView: View {
                     Text("Privacy Policy").foregroundStyle(.primary)
                     Spacer()
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 15, weight: .medium))
+                        .font(.system(.subheadline, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 14)

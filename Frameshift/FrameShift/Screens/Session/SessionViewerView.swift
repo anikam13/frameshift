@@ -8,6 +8,7 @@ struct SessionViewerView: View {
     let startItemID: UUID
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var currentID: UUID?
     @State private var isHolding = false
@@ -29,6 +30,12 @@ struct SessionViewerView: View {
     }
 
     var body: some View {
+        // Text scales with Dynamic Type up to the largest standard size;
+        // fixed-height controls would clip at accessibility sizes (D-32).
+        screen.dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+    }
+
+    private var screen: some View {
         VStack(spacing: 0) {
             topBar
             TabView(selection: $currentID) {
@@ -46,7 +53,7 @@ struct SessionViewerView: View {
             if let toast {
                 ConfirmationToast(message: toast)
                     .padding(.bottom, 96)
-                    .transition(.opacity)
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .bottom)))
             }
         }
         .animation(.easeOut(duration: 0.2), value: toast)
@@ -65,13 +72,13 @@ struct SessionViewerView: View {
     private var topBar: some View {
         ZStack {
             Text(titleText)
-                .font(.system(size: 15, weight: .medium))
+                .font(.system(.subheadline, weight: .medium))
                 .foregroundStyle(.white)
                 .monospacedDigit()
             HStack {
                 Button { dismiss() } label: {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 18, weight: .medium))
+                        .font(.system(.body, weight: .medium))
                         .foregroundStyle(.white)
                         .frame(width: 44, height: 44)
                 }
@@ -92,7 +99,7 @@ struct SessionViewerView: View {
                         }
                     } label: {
                         Image(systemName: "ellipsis")
-                            .font(.system(size: 18, weight: .medium))
+                            .font(.system(.body, weight: .medium))
                             .foregroundStyle(.white)
                             .frame(width: 44, height: 44)
                     }
@@ -152,7 +159,7 @@ struct SessionViewerView: View {
                     isComparing.toggle()
                 } label: {
                     Text(showsReference ? "Show Photo" : "Compare")
-                        .font(.system(size: 15, weight: .medium))
+                        .font(.system(.subheadline, weight: .medium))
                         .foregroundStyle(.white)
                         .frame(width: 172, height: 48)
                         .background(Capsule().fill(Color(hex: "#262626")))

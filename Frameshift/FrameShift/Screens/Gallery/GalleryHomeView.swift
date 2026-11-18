@@ -36,8 +36,9 @@ struct GalleryHomeView: View {
         GridItem(.flexible(), spacing: 12),
     ]
 
-    private var hasChosenReference: Bool {
-        appState.references.contains { $0.lastUsedAt != nil }
+    /// Resume Camera shows only while a capture session is active (D-4).
+    private var hasActiveSession: Bool {
+        !appState.sessionShots.isEmpty
     }
 
     private var gridPhotos: [ReferencePhoto] {
@@ -48,6 +49,12 @@ struct GalleryHomeView: View {
     }
 
     var body: some View {
+        // Text scales with Dynamic Type up to the largest standard size;
+        // fixed-height controls would clip at accessibility sizes (D-32).
+        screen.dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+    }
+
+    private var screen: some View {
         VStack(spacing: 0) {
             header
             ScrollView {
@@ -92,6 +99,8 @@ struct GalleryHomeView: View {
         .fullScreenCover(item: $preview) { request in
             ReferencePreviewView(request: request)
                 .environmentObject(appState)
+                // Transparent so Recreate can morph the photo onto the camera.
+                .presentationBackground(.clear)
         }
         .sheet(isPresented: $showSettings) {
             SettingsView()
@@ -132,13 +141,13 @@ struct GalleryHomeView: View {
     private var header: some View {
         HStack(spacing: 0) {
             Text("FrameShift")
-                .font(.system(size: 22, weight: .bold))
+                .font(.system(.title2, weight: .bold))
                 .tracking(-0.77)
                 .foregroundStyle(.primary)
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 0)
             HStack(spacing: 8) {
-                if hasChosenReference {
+                if hasActiveSession {
                     headerButton(systemName: "camera", label: "Resume Camera") {
                         openCamera()
                     }
@@ -168,7 +177,7 @@ struct GalleryHomeView: View {
 
     private func headerGlyph(_ systemName: String) -> some View {
         Image(systemName: systemName)
-            .font(.system(size: 20, weight: .regular))
+            .font(.system(.title3, weight: .regular))
             .foregroundStyle(.primary)
             .frame(width: 44, height: 44)
             .contentShape(Rectangle())
@@ -240,7 +249,7 @@ struct GalleryHomeView: View {
                         withAnimation(.easeOut(duration: 0.15)) { filter = option }
                     } label: {
                         Text(option.title)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(.footnote, weight: .medium))
                             .foregroundStyle(selected ? Color(.systemBackground) : Color.primary)
                             .padding(.horizontal, 14)
                             .frame(height: 34)
@@ -293,15 +302,15 @@ struct GalleryHomeView: View {
         case .yours:
             VStack(spacing: 0) {
                 Text("No imported references")
-                    .font(.system(size: 20, weight: .bold))
+                    .font(.system(.title3, weight: .bold))
                     .foregroundStyle(.primary)
                 Text("Add a photo from your library.")
-                    .font(.system(size: 15))
+                    .font(.system(.subheadline))
                     .foregroundStyle(.secondary)
                     .padding(.top, 10)
                 PhotosPicker(selection: $picks, maxSelectionCount: 10, matching: .images) {
                     Label("Add Photo", systemImage: "plus")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.system(.callout, weight: .semibold))
                         .foregroundStyle(Color(.systemBackground))
                         .padding(.horizontal, 26)
                         .frame(height: 50)
@@ -417,7 +426,7 @@ private struct SourceSwitch: View {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) { selection = value }
         } label: {
             Text(title)
-                .font(.system(size: 15, weight: selected ? .bold : .regular))
+                .font(.system(.subheadline, weight: selected ? .bold : .regular))
                 .foregroundStyle(selected ? Color.primary : Color.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background {
@@ -457,7 +466,7 @@ struct GalleryReferenceTile: View {
             .overlay(alignment: .topTrailing) {
                 if photo.isCurated && photo.isFavorite {
                     Image(systemName: "bookmark.fill")
-                        .font(.system(size: 15))
+                        .font(.system(.subheadline))
                         .foregroundStyle(.white)
                         .shadow(color: .black.opacity(0.35), radius: 2)
                         .padding(10)
@@ -476,7 +485,7 @@ struct GalleryReferenceTile: View {
                 // Curated photos are vetted; only imports can fail analysis.
                 if photo.analysisFailed && !photo.isCurated {
                     Label("No person found", systemImage: "person.fill.questionmark")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(.caption, weight: .medium))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 5)

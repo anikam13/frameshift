@@ -19,6 +19,12 @@ struct ReferencePickerSheet: View {
     private var isExpanded: Bool { detent == .large }
 
     var body: some View {
+        // Text scales with Dynamic Type up to the largest standard size;
+        // fixed-height controls would clip at accessibility sizes (D-32).
+        screen.dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+    }
+
+    private var screen: some View {
         VStack(alignment: .leading, spacing: 8) {
             header
             if isExpanded {
@@ -38,7 +44,7 @@ struct ReferencePickerSheet: View {
     private var header: some View {
         HStack {
             Text("References")
-                .font(.system(size: 20, weight: .bold))
+                .font(.system(.title3, weight: .bold))
                 .foregroundStyle(.primary)
             Spacer()
             HStack(spacing: 8) {
@@ -46,14 +52,14 @@ struct ReferencePickerSheet: View {
                     withAnimation { detent = isExpanded ? Self.compactDetent : .large }
                 } label: {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.up")
-                        .font(.system(size: 17, weight: .regular))
+                        .font(.system(.body, weight: .regular))
                         .frame(width: 44, height: 44)
                 }
                 .accessibilityLabel(isExpanded ? "Collapse" : "Show all references")
 
                 Button { dismiss() } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 17, weight: .regular))
+                        .font(.system(.body, weight: .regular))
                         .frame(width: 44, height: 44)
                 }
                 .accessibilityLabel("Close")
@@ -69,20 +75,20 @@ struct ReferencePickerSheet: View {
     private var compactContent: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Favorites & recent")
-                .font(.system(size: 13))
+                .font(.system(.footnote))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 16)
 
             if appState.quickAccessReferences.isEmpty {
                 Text("References you use or favorite appear here.")
-                    .font(.system(size: 15))
+                    .font(.system(.subheadline))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
                 Button("Browse all references") {
                     withAnimation { detent = .large }
                 }
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(.subheadline, weight: .semibold))
                 .padding(.horizontal, 16)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -130,7 +136,7 @@ struct ReferencePickerSheet: View {
                     Text(collection == .yours
                          ? "Photos you import appear here."
                          : "No references in this category yet.")
-                        .font(.system(size: 15))
+                        .font(.system(.subheadline))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)
                         .padding(.top, 40)
@@ -159,7 +165,7 @@ struct ReferencePickerSheet: View {
                         filter = option
                     } label: {
                         Text(option.title)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(.footnote, weight: .medium))
                             .foregroundStyle(selected ? Color(.systemBackground) : .primary)
                             .padding(.horizontal, 14)
                             .frame(height: 34)
@@ -210,7 +216,7 @@ struct ReferencePickerSheet: View {
                     // Bookmark marks favorited curated photos only.
                     if ref.isFavorite && ref.isCurated {
                         Image(systemName: "bookmark.fill")
-                            .font(.system(size: 15))
+                            .font(.system(.subheadline))
                             .foregroundStyle(.white)
                             .shadow(color: .black.opacity(0.35), radius: 2)
                             .padding(10)
@@ -255,7 +261,8 @@ struct ReferencePickerSheet: View {
     }
 }
 
-/// Explore composition chips. Backed by `ShotSpec.framing` for now.
+/// Explore composition chips. Curated photos use their hand tags
+/// (`SampleReferencePack.tags`); imports fall back to `ShotSpec.framing`.
 enum CompositionFilter: CaseIterable, Hashable {
     case all, fullBody, portraits, seated, couples, groups
 
@@ -271,6 +278,9 @@ enum CompositionFilter: CaseIterable, Hashable {
     }
 
     func matches(_ ref: ReferencePhoto) -> Bool {
+        if self != .all, let name = ref.bundledAssetName, let tags = SampleReferencePack.tags[name] {
+            return tags.contains(self)
+        }
         switch self {
         case .all:       return true
         case .fullBody:  return ref.spec?.framing == .wide

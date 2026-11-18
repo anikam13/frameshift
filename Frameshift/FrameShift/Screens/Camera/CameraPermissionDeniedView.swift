@@ -7,11 +7,11 @@ struct CameraPermissionDeniedView: View {
     var body: some View {
         VStack(spacing: 0) {
             Text("Camera access is off")
-                .font(.system(size: 20, weight: .semibold))
+                .font(.system(.title3, weight: .semibold))
                 .foregroundStyle(.white)
 
             Text("Allow camera access in Settings\nto take photos with FrameShift.")
-                .font(.system(size: 15))
+                .font(.system(.subheadline))
                 .foregroundStyle(.white.opacity(0.8))
                 .multilineTextAlignment(.center)
                 .padding(.top, 12)
@@ -22,7 +22,7 @@ struct CameraPermissionDeniedView: View {
                 }
             } label: {
                 Text("Open Settings")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(.callout, weight: .semibold))
                     .foregroundStyle(.black)
                     .padding(.horizontal, 28)
                     .frame(height: 50)
@@ -63,17 +63,17 @@ struct CameraAccessExplanationView: View {
 
             VStack(alignment: .leading, spacing: 0) {
                 Text("Enable your camera")
-                    .font(.system(size: 22, weight: .bold))
+                    .font(.system(.title2, weight: .bold))
                     .foregroundStyle(Color(hex: "#1C1C1E"))
                 Text("FrameShift needs camera access to help you frame and take your shot.")
-                    .font(.system(size: 17))
+                    .font(.system(.body))
                     .foregroundStyle(Color(hex: "#636366"))
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 12)
 
                 Button(action: onContinue) {
                     Text("Continue")
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.system(.body, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .frame(height: 52)
@@ -84,7 +84,7 @@ struct CameraAccessExplanationView: View {
 
                 Button(action: onNotNow) {
                     Text("Not Now")
-                        .font(.system(size: 17))
+                        .font(.system(.body))
                         .foregroundStyle(Color(hex: "#1C1C1E"))
                         .frame(maxWidth: .infinity)
                         .frame(height: 50)
@@ -104,7 +104,7 @@ struct CameraAccessExplanationView: View {
         .overlay(alignment: .topLeading) {
             Button(action: onNotNow) {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(.body, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
                     .background(Circle().fill(.ultraThinMaterial))
@@ -127,11 +127,11 @@ struct ReferenceUnavailableCard: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Couldn’t prepare reference")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(.body, weight: .semibold))
                 Spacer()
                 Button(action: onDismiss) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(.footnote, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.7))
                         .frame(width: 28, height: 28)
                 }
@@ -139,11 +139,11 @@ struct ReferenceUnavailableCard: View {
                 .accessibilityLabel("Dismiss")
             }
             Text("You can still take photos.")
-                .font(.system(size: 15))
+                .font(.system(.subheadline))
                 .foregroundStyle(.white.opacity(0.85))
                 .padding(.top, 2)
             Button("Try Again", action: onRetry)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(.subheadline, weight: .semibold))
                 .foregroundStyle(.white)
                 .padding(.top, 14)
         }

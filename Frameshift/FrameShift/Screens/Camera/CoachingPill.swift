@@ -26,10 +26,10 @@ struct CoachingPill: View {
                 case .lookingGood:
                     HStack(spacing: 8) {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(.footnote, weight: .semibold))
                             .foregroundStyle(Color.cameraYellow)
                         Text("Looking good")
-                            .font(.system(size: 15, weight: .medium))
+                            .font(.system(.subheadline, weight: .medium))
                             .foregroundStyle(.white)
                     }
                     .padding(.horizontal, 18)
@@ -38,13 +38,13 @@ struct CoachingPill: View {
                 case .readyCheck:
                     circle {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.system(.subheadline, weight: .semibold))
                             .foregroundStyle(Color.cameraYellow)
                     }
                 case .collapsed:
                     circle {
                         Image(systemName: "text.bubble")
-                            .font(.system(size: 16, weight: .regular))
+                            .font(.system(.callout, weight: .regular))
                             .foregroundStyle(.white)
                     }
                 }
@@ -59,7 +59,7 @@ struct CoachingPill: View {
 
     private func label(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 15, weight: .medium))
+            .font(.system(.subheadline, weight: .medium))
             .foregroundStyle(.white)
             .lineLimit(1)
             .padding(.horizontal, 18)

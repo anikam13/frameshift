@@ -18,14 +18,20 @@ class AppState: ObservableObject {
     @Published var references: [ReferencePhoto] = []
     @Published var activeReferenceIndex: Int = 0
 
-    // Captured shots (shown in the gallery preview)
+    // This session's captures, newest first (plus any whose Photos save is
+    // still pending or failed). Not an archive: dropped when the session ends
+    // and never persisted across launches (D-25).
     @Published var capturedShots: [CapturedPhoto] = []
-
-    // User-created filter presets (look-source photos), creation order.
-    @Published var filterPresets: [CustomFilterPreset] = []
 
     // Camera is the default mode; the REFERENCE · CAMERA pill switches this.
     @Published var selectedTab: Tab = .references
+
+    /// The camera viewfinder's frame in window coordinates — where Recreate's
+    /// morph lands (D-29). Not published: only read when Recreate is tapped.
+    var viewfinderFrame: CGRect = .zero
+    /// True while the Recreate morph is flying onto the viewfinder. The camera
+    /// holds the overlay back until it lands so the person isn't shown twice.
+    @Published var isRecreateMorphInFlight = false
 
     /// True while import/restore Vision work is in flight. Camera pauses live
     /// subject detection against this so preview isn't starved.
@@ -39,8 +45,7 @@ class AppState: ObservableObject {
     private let store = ReferenceStore()
     private let analyzer = VisionAnalyzer()
     private let segmenter = PersonSegmenter()
-    private let capturedStore = CapturedStore()
-    private let filterPresetStore = FilterPresetStore()
+    private let captureCache = SessionCaptureCache()
     private let visionQueue = VisionWorkQueue()
     private var pendingVisionJobs = 0
 
@@ -235,16 +240,60 @@ class AppState: ObservableObject {
         return added
     }
 
+    /// Ends a stale session: its shots leave memory and the temporary cache.
+    /// Shots not yet confirmed saved (pending / failed) are kept.
     private func rollSessionIfStale(now: Date = Date()) {
-        if let last = lastSessionCaptureAt, now.timeIntervalSince(last) > Self.sessionInactivityLimit {
-            sessionShotIDs.removeAll()
+        guard let last = lastSessionCaptureAt,
+              now.timeIntervalSince(last) > Self.sessionInactivityLimit
+        else { return }
+        let ended = Set(sessionShotIDs)
+        capturedShots.removeAll { ended.contains($0.id) }
+        sessionShotIDs.removeAll()
+        lastSessionCaptureAt = nil
+        deleteCachedCaptures(Array(ended))
+        persistSessionManifest()
+    }
+
+    /// Writes the open session's manifest so it survives iOS closing the app
+    /// in the background (D-2). Only shots confirmed saved to Photos.
+    private func persistSessionManifest() {
+        let manifest: SessionCaptureCache.Manifest?
+        if let last = lastSessionCaptureAt, !sessionShotIDs.isEmpty {
+            let ids = Set(sessionShotIDs)
+            manifest = .init(
+                lastCaptureAt: last,
+                shots: capturedShots.filter { ids.contains($0.id) }.map {
+                    .init(id: $0.id, capturedAt: $0.capturedAt, referenceID: $0.referenceID,
+                          burstID: $0.burstID, isBurstBest: $0.isBurstBest)
+                }
+            )
+        } else {
+            manifest = nil
         }
+        Task.detached(priority: .utility) { [captureCache] in
+            captureCache.saveManifest(manifest)
+        }
+    }
+
+    private func deleteCachedCaptures(_ ids: [UUID]) {
+        guard !ids.isEmpty else { return }
+        Task.detached(priority: .utility) { [captureCache] in
+            for id in ids { captureCache.deleteImage(id: id) }
+        }
+    }
+
+    /// Keeps the session count in step after a removal.
+    private func syncSessionIDs() {
+        let existing = Set(capturedShots.map(\.id))
+        sessionShotIDs.removeAll { !existing.contains($0) }
+        persistSessionManifest()
     }
 
     private func noteSessionSaved(id: UUID) {
         rollSessionIfStale()
         lastSessionCaptureAt = Date()
         sessionShotIDs.insert(id, at: 0)
+        persistSessionManifest()
     }
 
     /// Loads a persisted ghost cutout on demand (active ref / ghost overlay).
@@ -572,8 +621,7 @@ class AppState: ObservableObject {
 
     // MARK: Captured shots
 
-    /// Single-shot path: downsamples off-main so a full-res capture (or filter
-    /// save) never freezes the viewfinder / gallery on insert.
+    /// Single-shot path: downsamples off-main so a full-res capture never freezes the viewfinder / gallery on insert.
     func addCapturedShot(_ image: UIImage, referenceID: UUID?, burstID: UUID? = nil) {
         let maxSize = UIImage.displayMaxPixelSize
         Task.detached(priority: .userInitiated) {
@@ -604,15 +652,15 @@ class AppState: ObservableObject {
     /// would freeze the viewfinder for the whole hold.
     @discardableResult
     func insertCapturedShot(display: UIImage, full image: UIImage, referenceID: UUID?, burstID: UUID?) -> UUID {
+        rollSessionIfStale()
         let shot = CapturedPhoto(image: display, referenceID: referenceID, burstID: burstID)
         capturedShots.insert(shot, at: 0)
-        persistCapturedManifest()
 
-        Task.detached(priority: .utility) { [capturedStore] in
+        // Temporary full-size copy for share / Add to References / retry;
+        // a failure here only costs full resolution, so it stays silent.
+        Task.detached(priority: .utility) { [captureCache] in
             guard let data = image.jpegData(compressionQuality: 0.92) else { return }
-            if !capturedStore.saveImageData(data, id: shot.id) {
-                await MainActor.run { self.showTransientNotice("Couldn't save this photo") }
-            }
+            captureCache.saveImageData(data, id: shot.id)
         }
 
         Task.detached(priority: .utility) {
@@ -664,27 +712,8 @@ class AppState: ObservableObject {
 
     func removeCapturedShot(id: UUID) {
         capturedShots.removeAll { $0.id == id }
-        persistCapturedManifest()
-        Task.detached(priority: .utility) { [capturedStore] in
-            capturedStore.deleteImage(id: id)
-        }
-    }
-
-    /// Library mass-delete — one persist pass, then files off-main.
-    func removeCapturedShots(ids: [UUID]) {
-        guard !ids.isEmpty else { return }
-        let idSet = Set(ids)
-        capturedShots.removeAll { idSet.contains($0.id) }
-        persistCapturedManifest()
-        Task.detached(priority: .utility) { [capturedStore] in
-            for id in ids { capturedStore.deleteImage(id: id) }
-        }
-    }
-
-    func setFavorite(id: UUID, isFavorite: Bool) {
-        guard let index = capturedShots.firstIndex(where: { $0.id == id }) else { return }
-        capturedShots[index].isFavorite = isFavorite
-        persistCapturedManifest()
+        syncSessionIDs()
+        deleteCachedCaptures([id])
     }
 
     // MARK: Bursts
@@ -698,37 +727,7 @@ class AppState: ObservableObject {
         for index in capturedShots.indices where capturedShots[index].burstID == burstID {
             capturedShots[index].isBurstBest = (capturedShots[index].id == id)
         }
-        persistCapturedManifest()
-    }
-
-    /// Deletes every shot captured in one burst.
-    func removeBurst(burstID: UUID) {
-        let ids = capturedShots.filter { $0.burstID == burstID }.map(\.id)
-        guard !ids.isEmpty else { return }
-        capturedShots.removeAll { $0.burstID == burstID }
-        persistCapturedManifest()
-        Task.detached(priority: .utility) { [capturedStore] in
-            for id in ids { capturedStore.deleteImage(id: id) }
-        }
-    }
-
-    /// Burst picker's "Keep Only This" — deletes the rest of the burst. The
-    /// survivor keeps its burstID but a one-shot group renders as a normal
-    /// photo in the gallery.
-    func keepOnlyBurstShot(id: UUID) {
-        guard
-            let keep = capturedShots.first(where: { $0.id == id }),
-            let burstID = keep.burstID
-        else { return }
-        let removeIDs = capturedShots
-            .filter { $0.burstID == burstID && $0.id != id }
-            .map(\.id)
-        guard !removeIDs.isEmpty else { return }
-        capturedShots.removeAll { removeIDs.contains($0.id) }
-        persistCapturedManifest()
-        Task.detached(priority: .utility) { [capturedStore] in
-            for id in removeIDs { capturedStore.deleteImage(id: id) }
-        }
+        persistSessionManifest()
     }
 
     /// Resolves a captured shot's reference, tolerating deletion of the reference since.
@@ -737,81 +736,40 @@ class AppState: ObservableObject {
         return references.first { $0.id == id }
     }
 
-    /// Full-resolution captured shot for filter rendering. Display bitmaps in
-    /// memory are downsampled; this reloads from disk.
+    /// Full-resolution capture from the session cache (memory holds
+    /// display-sized bitmaps). Nil once the session's cache is gone.
     func loadFullShot(id: UUID) async -> UIImage? {
-        await Task.detached(priority: .userInitiated) { [capturedStore] in
-            capturedStore.loadFullImage(id: id)
+        await Task.detached(priority: .userInitiated) { [captureCache] in
+            captureCache.loadFullImage(id: id)
         }.value
     }
 
-    /// Settings' "Clear All Captured Shots" — only removes FrameShift's local
-    /// copies; anything already saved to the system Photos library stays there,
-    /// matching how single-shot delete already behaves.
-    func clearAllCapturedShots() {
-        let ids = capturedShots.map(\.id)
-        capturedShots.removeAll()
-        sessionShotIDs.removeAll()
-        Task.detached(priority: .utility) { [capturedStore] in
-            for id in ids { capturedStore.deleteImage(id: id) }
-        }
-        persistCapturedManifest()
-    }
-
-    /// Reloads persisted captured shots on launch. Utility priority: this
-    /// decodes a thumbnail per shot (bursts make that dozens), and only the
-    /// bottom-left gallery thumb shows it — it must not race camera startup.
-    func restoreCapturedShots() async {
-        guard capturedShots.isEmpty else { return }
-        let restored = await Task.detached(priority: .utility) { [capturedStore] in
-            capturedStore.loadAll()
+    /// Launch: brings back a session that was still open when iOS closed
+    /// the app (last capture within `sessionInactivityLimit`); otherwise
+    /// clears the cache. Also removes stores from pre-redesign builds.
+    func restoreSessionFromPreviousLaunch() async {
+        let limit = Self.sessionInactivityLimit
+        let restored = await Task.detached(priority: .utility) { [captureCache] in
+            captureCache.restoreOpenSession(limit: limit)
         }.value
-        capturedShots = restored
-            .sorted { $0.capturedAt > $1.capturedAt }
-            .map {
-                CapturedPhoto(
-                    id: $0.id, image: $0.image, capturedAt: $0.capturedAt,
-                    referenceID: $0.referenceID, isFavorite: $0.isFavorite,
-                    burstID: $0.burstID, isBurstBest: $0.isBurstBest
-                )
-            }
-    }
-
-    #if DEBUG
-    private var suppressCapturedPersistence = false
-    #endif
-
-    private func persistCapturedManifest() {
-        #if DEBUG
-        if suppressCapturedPersistence { return }
-        #endif
-        // Deleted shots leave the session count too (every removal path
-        // rewrites the manifest, so this is the one choke point).
-        let existing = Set(capturedShots.map(\.id))
-        if sessionShotIDs.contains(where: { !existing.contains($0) }) {
-            sessionShotIDs.removeAll { !existing.contains($0) }
+        guard let restored, capturedShots.isEmpty else { return }
+        capturedShots = restored.shots.map {
+            CapturedPhoto(
+                id: $0.shot.id, image: $0.image, capturedAt: $0.shot.capturedAt,
+                referenceID: $0.shot.referenceID, burstID: $0.shot.burstID,
+                isBurstBest: $0.shot.isBurstBest
+            )
         }
-        let manifest = CapturedStore.Manifest(
-            shots: capturedShots.map {
-                .init(
-                    id: $0.id, capturedAt: $0.capturedAt, referenceID: $0.referenceID,
-                    isFavorite: $0.isFavorite, burstID: $0.burstID, isBurstBest: $0.isBurstBest
-                )
-            }
-        )
-        Task.detached(priority: .utility) { [capturedStore] in
-            _ = capturedStore.saveManifest(manifest)
-        }
+        sessionShotIDs = capturedShots.map(\.id)
+        lastSessionCaptureAt = restored.lastCaptureAt
     }
 
     #if DEBUG
     /// Preview hook (`-preview-seed-session`): fakes a capture session from
     /// the reference photos — three singles and a 6-shot burst — so the
     /// session gallery can be checked in the Simulator (no camera there).
-    /// In-memory only; captured-shot persistence is suppressed.
     func seedSessionForPreview() {
         guard !references.isEmpty else { return }
-        suppressCapturedPersistence = true
         var shots: [CapturedPhoto] = []
         let burstID = UUID()
         for index in 0..<6 {
@@ -826,83 +784,32 @@ class AppState: ObservableObject {
         lastSessionCaptureAt = Date()
     }
 
-    /// UI-test hook (`-uitest-seed-references` launch argument): in-memory
-    /// references only, no disk writes, no Vision analysis.
-    func seedReferencesForUITests(count: Int = 4) {
-        let colors: [UIColor] = [.systemRed, .systemBlue, .systemGreen, .systemOrange]
-        references = (0..<count).map { index in
-            let size = CGSize(width: 300, height: 400)
-            let image = UIGraphicsImageRenderer(size: size).image { context in
-                colors[index % colors.count].setFill()
-                context.fill(CGRect(origin: .zero, size: size))
-            }
-            var photo = ReferencePhoto(image: image)
-            photo.analysisFailed = true   // stable "No subject" section, no spinner
+    /// UI-test hook (`-uitest-seed-references` launch argument): the curated
+    /// set plus one import, in memory only — no disk writes, no Vision, and
+    /// no sample auto-import (nothing is missing).
+    func seedReferencesForUITests() {
+        var seeded: [ReferencePhoto] = SampleReferencePack.assetNames.compactMap { name in
+            guard let image = UIImage(named: name) else { return nil }
+            var photo = ReferencePhoto(image: image, bundledAssetName: name)
+            photo.analysisFailed = true
             return photo
         }
+        let size = CGSize(width: 300, height: 400)
+        let imported = UIGraphicsImageRenderer(size: size).image { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+        }
+        var mine = ReferencePhoto(image: imported)
+        mine.analysisFailed = true
+        seeded.insert(mine, at: 0)
+        references = seeded
         selectedTab = .references
         hasFinishedRestoringReferences = true
     }
     #endif
 
-    // MARK: Custom filter presets
-
-    /// Creates a preset from a look-source photo picked in the filter sheet.
-    /// The image arrives already downsampled — only its color stats matter.
-    @discardableResult
-    func addFilterPreset(from image: UIImage) -> CustomFilterPreset {
-        // Numbering survives deletes: one past the highest existing number,
-        // so a fresh preset never takes a deleted one's name.
-        let nextNumber = (filterPresets.compactMap { preset in
-            preset.name.hasPrefix("Preset ") ? Int(preset.name.dropFirst(7)) : nil
-        }.max() ?? 0) + 1
-        let preset = CustomFilterPreset(
-            id: UUID(), name: "Preset \(nextNumber)", image: image, createdAt: Date()
-        )
-        filterPresets.append(preset)
-
-        let id = preset.id
-        Task.detached(priority: .utility) { [filterPresetStore] in
-            guard
-                let data = image.jpegData(compressionQuality: 0.85),
-                filterPresetStore.saveImageData(data, id: id)
-            else {
-                await MainActor.run { self.showTransientNotice("Couldn't save this preset") }
-                return
-            }
-        }
-        persistFilterPresetManifest()
-        return preset
-    }
-
-    func removeFilterPreset(id: UUID) {
-        filterPresets.removeAll { $0.id == id }
-        Task.detached(priority: .utility) { [filterPresetStore] in
-            filterPresetStore.deleteImage(id: id)
-        }
-        persistFilterPresetManifest()
-    }
-
-    /// Reloads persisted filter presets on launch. Utility: nothing on the
-    /// camera screen needs these — first use is the gallery's filter sheet.
-    func restoreFilterPresets() async {
-        guard filterPresets.isEmpty else { return }
-        filterPresets = await Task.detached(priority: .utility) { [filterPresetStore] in
-            filterPresetStore.loadAll()
-        }.value
-    }
-
-    private func persistFilterPresetManifest() {
-        filterPresetStore.saveManifest(FilterPresetStore.Manifest(
-            presets: filterPresets.map {
-                .init(id: $0.id, name: $0.name, createdAt: $0.createdAt)
-            }
-        ))
-    }
-
     /// Surfaces the "photos aren't saving to your camera roll" notice, once
-    /// per app launch. Called for both raw captures and export-card saves so
-    /// either path can trigger it without double-showing.
+    /// per app launch.
     func notePhotoLibraryDenied() {
         guard !hasShownPhotoLibraryDeniedNotice else { return }
         hasShownPhotoLibraryDeniedNotice = true

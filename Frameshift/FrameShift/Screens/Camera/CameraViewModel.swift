@@ -53,7 +53,7 @@ class CameraViewModel: ObservableObject {
 
     private func setAidMode(_ mode: AidMode) {
         UISelectionFeedbackGenerator().selectionChanged()
-        withAnimation(.easeInOut(duration: 0.25)) { aidMode = mode }
+        withAnimation(.easeOut(duration: 0.25)) { aidMode = mode }
     }
 
     /// New camera session or new reference: back to adaptive Overlay.
@@ -74,7 +74,7 @@ class CameraViewModel: ObservableObject {
         guard aidMode == .adaptiveOverlay else { return }
         if let since = personSeenSince {
             if now.timeIntervalSince(since) >= Self.stableDetectionDelay {
-                withAnimation(.easeInOut(duration: 0.4)) { aidMode = .adaptiveGuides }
+                withAnimation(.easeOut(duration: 0.4)) { aidMode = .adaptiveGuides }
             }
         } else {
             personSeenSince = now
@@ -136,6 +136,11 @@ class CameraViewModel: ObservableObject {
 
     private var activeSpec: ShotSpec?
     private let coach = CompositionCoach()
+    #if DEBUG
+    /// Debug-only coaching eval (`⋯` → Coaching Eval; docs/coaching-eval.md).
+    let eval = CoachEval()
+    @Published var isEvalHUDVisible = false
+    #endif
     private let liveAnalyzer = LiveVisionAnalyzer()
     private var liveDetection: LiveVisionAnalyzer.Subject?
     private var liveContentSize: CGSize = .zero
@@ -340,6 +345,33 @@ class CameraViewModel: ObservableObject {
             zoomFactor = nearest
             camera.setZoom(nearest)
         }
+    }
+
+    // MARK: Zoom fine-adjust (D-22)
+
+    /// Horizontal drag across the zoom row: left zooms in, right zooms out,
+    /// exponential so each lens step takes a similar swipe. Shares the
+    /// pinch path; a tick when the zoom crosses a lens preset.
+    @Published private(set) var isZoomScrubbing = false
+
+    func handleZoomScrubChanged(translation: CGFloat) {
+        isZoomScrubbing = true
+        let before = activeZoomLevel
+        handlePinchChanged(exp(-translation / 140))
+        if activeZoomLevel != before { UISelectionFeedbackGenerator().selectionChanged() }
+    }
+
+    func handleZoomScrubEnded() {
+        isZoomScrubbing = false
+        handlePinchEnded()
+    }
+
+    /// VoiceOver adjustable action on the zoom row.
+    func stepZoom(up: Bool) {
+        let target = min(max(zoomFactor * (up ? 1.25 : 0.8), minZoom), maxZoom)
+        zoomFactor = target
+        camera.setZoom(target, animated: true)
+        evaluateCoaching()
     }
 
     /// Pill taps ramp to the target like the native app; pinch stays direct.
@@ -659,6 +691,9 @@ class CameraViewModel: ObservableObject {
                 if isLevel && !self.levelHapticFired {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     self.levelHapticFired = true
+                    #if DEBUG
+                    if self.isEvalHUDVisible { self.eval.noteLevelHaptic() }
+                    #endif
                 } else if !isLevel {
                     self.levelHapticFired = false
                 }
@@ -673,13 +708,16 @@ class CameraViewModel: ObservableObject {
             return
         }
 
+        let liveSubject = liveSubjectInViewfinder()
+        let headOffset = liveHeadOffset(spec: spec)
+        let shoulderRatio = liveShoulderRatio(spec: spec)
         let output = coach.evaluate(
             CompositionCoach.Input(
                 spec: spec,
-                liveSubject: liveSubjectInViewfinder(),
+                liveSubject: liveSubject,
                 referenceSubject: referenceSubjectInViewfinder(spec: spec),
-                headOffset: liveHeadOffset(spec: spec),
-                shoulderRatio: liveShoulderRatio(spec: spec),
+                headOffset: headOffset,
+                shoulderRatio: shoulderRatio,
                 roll: deviceRoll,
                 pitch: devicePitch,
                 zoom: zoomFactor,
@@ -692,6 +730,22 @@ class CameraViewModel: ObservableObject {
         activeTip = output.tip
         activeTipKind = output.tipKind
 
+        #if DEBUG
+        if isEvalHUDVisible {
+            let degrees = 180 / Double.pi
+            eval.record(CoachEval.Snapshot(
+                subjectDetected: liveSubject != nil || headOffset != nil,
+                headOffset: headOffset.map { hypot($0.dx, $0.dy) },
+                shoulderRatio: shoulderRatio,
+                rollErrorDegrees: spec.hasTrustedRoll ? (deviceRoll - spec.coachRollTarget) * degrees : nil,
+                pitchErrorDegrees: spec.hasTrustedPitch ? (devicePitch - (spec.targetPitch ?? 0)) * degrees : nil,
+                lighting: lightingScore,
+                progress: output.progress,
+                tip: output.tip
+            ))
+        }
+        #endif
+
         // One subtle haptic + brief confirmation per alignment. allSatisfied
         // already carries the coach's hysteresis, so this re-arms only after
         // a real misalignment.
@@ -699,6 +753,9 @@ class CameraViewModel: ObservableObject {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             allClearHapticFired = true
             beginAlignedConfirmation()
+            #if DEBUG
+            if isEvalHUDVisible { eval.noteAlignment() }
+            #endif
         } else if !output.progress.allSatisfied {
             allClearHapticFired = false
             endAlignedConfirmation()
