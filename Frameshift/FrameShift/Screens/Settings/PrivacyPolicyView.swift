@@ -23,7 +23,7 @@ struct PrivacyPolicyView: View {
         ),
         Section(
             title: "Photo Library Access",
-            body: "Importing reference photos is handled through Apple's system photo picker, which runs outside of FrameShift's process — FrameShift only ever receives the specific photos you choose to import, never broad library access. Saving your photos uses \"add-only\" access: FrameShift saves the photos you take to your camera roll, but cannot read, browse, or modify the rest of your photo library."
+            body: "Importing reference photos is handled through Apple's system photo picker, which runs outside of FrameShift's process — FrameShift only ever receives the specific photos you choose to import, never broad library access. Saving your photos uses \"add-only\" access: FrameShift saves the photos you take to your camera roll, but cannot read, browse, or modify the rest of your photo library. If you choose Delete on a photo you took in FrameShift, iOS asks you to allow photo access and confirm; FrameShift uses it only to delete the photos it saved for you (they go to Recently Deleted) and never reads the rest of your library."
         ),
         Section(
             title: "On-Device Processing",
@@ -31,7 +31,7 @@ struct PrivacyPolicyView: View {
         ),
         Section(
             title: "Data Storage",
-            body: "Reference photos and your app settings are stored locally in FrameShift's private storage on your device. Photos you take are saved to your camera roll; FrameShift keeps only a temporary copy while your shooting session is open, deleted when the session ends or the app restarts. Nothing is synced to iCloud or any external server by FrameShift itself."
+            body: "Reference photos and your app settings are stored locally in FrameShift's private storage on your device. Photos you take are saved to your camera roll; FrameShift keeps only a temporary copy while your shooting session is open, deleted when the session ends (30 minutes after your last photo). Nothing is synced to iCloud or any external server by FrameShift itself."
         ),
         Section(
             title: "Data Deletion",

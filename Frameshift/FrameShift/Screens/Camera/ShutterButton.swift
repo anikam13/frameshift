@@ -10,6 +10,7 @@ struct ShutterButton: View {
     var isBursting: Bool = false
     /// Shots landed so far in the current burst, shown inside the button.
     var burstCount: Int = 0
+    var onPressDown: () -> Void = {}
     let onTap: () -> Void
     let onHoldStart: () -> Void
     let onHoldEnd: () -> Void
@@ -32,7 +33,7 @@ struct ShutterButton: View {
                 .fill(Color.white)
                 .frame(width: 66, height: 66)
                 .scaleEffect(isPressed ? 0.88 : 1.0)
-                .animation(.spring(response: 0.12, dampingFraction: 0.7), value: isPressed)
+                .animation(.easeOut(duration: 0.08), value: isPressed)
 
             if isBursting && burstCount > 0 {
                 Text("\(burstCount)")
@@ -52,6 +53,7 @@ struct ShutterButton: View {
                 .onChanged { _ in
                     guard !isPressed else { return }
                     isPressed = true
+                    onPressDown()
                     isHolding = false
                     holdTask = Task {
                         try? await Task.sleep(for: .seconds(holdThreshold))

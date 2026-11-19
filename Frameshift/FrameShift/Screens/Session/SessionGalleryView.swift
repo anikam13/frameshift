@@ -227,6 +227,19 @@ struct SessionGalleryView: View {
                     .frame(height: 48)
             }
             .disabled(!enabled)
+
+            Button(role: .destructive) {
+                deleteSelection()
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(.body, weight: .medium))
+                    .foregroundStyle(enabled ? Color.red : Color.secondary)
+                    .frame(width: 44, height: 48)
+            }
+            .buttonStyle(.plain)
+            .disabled(!enabled)
+            .accessibilityLabel("Delete")
+            .accessibilityHint("Deletes the selected photos from Photos")
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
@@ -246,6 +259,33 @@ struct SessionGalleryView: View {
             }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             show(toast: "\(added) added to Yours")
+        }
+    }
+
+    /// Selected items include whole bursts. iOS confirms the delete itself
+    /// and keeps the photos in Recently Deleted for 30 days.
+    private func deleteSelection() {
+        let ids = items.filter { selectedIDs.contains($0.id) }.flatMap(\.shots).map(\.id)
+        guard !ids.isEmpty else { return }
+        isAdding = true
+        Task {
+            let outcome = await appState.deleteCapturedShots(ids: ids)
+            isAdding = false
+            switch outcome {
+            case .deleted(let count):
+                withAnimation(.easeOut(duration: 0.2)) {
+                    isSelecting = false
+                    selectedIDs = []
+                }
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                show(toast: count == 1 ? "Deleted from Photos" : "\(count) deleted from Photos")
+            case .cancelled:
+                break
+            case .photosDenied:
+                show(toast: "Allow Photos access in Settings to delete")
+            case .failed:
+                show(toast: "Couldn’t delete")
+            }
         }
     }
 

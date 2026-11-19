@@ -17,6 +17,8 @@ nonisolated struct SessionCaptureCache {
             let referenceID: UUID?
             let burstID: UUID?
             let isBurstBest: Bool
+            /// Photos asset for Delete; absent in manifests written before 1.3.
+            var photosAssetID: String? = nil
         }
         let lastCaptureAt: Date
         let shots: [Shot]   // newest first, saved-to-Photos shots only

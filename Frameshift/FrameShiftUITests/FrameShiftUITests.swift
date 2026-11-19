@@ -17,6 +17,7 @@ final class FrameShiftUITests: XCTestCase {
             "-uitest-seed-references",
             "-frameshift.tour.explore.done", done,
             "-frameshift.tour.camera.done", done,
+            "-frameshift.welcome.done", "YES",
         ]
         if session { app.launchArguments.append("-preview-seed-session") }
         app.launch()
@@ -89,6 +90,7 @@ final class FrameShiftUITests: XCTestCase {
             "-uitest-seed-references", "-preview-seed-session",
             "-frameshift.tour.explore.done", "YES",
             "-frameshift.tour.camera.done", "YES",
+            "-frameshift.welcome.done", "YES",
         ]
         app.launch()
         // An active session shows Resume Camera (D-4).

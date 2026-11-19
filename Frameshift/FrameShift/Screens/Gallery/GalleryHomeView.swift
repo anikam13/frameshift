@@ -8,6 +8,7 @@ import PhotosUI
 /// scrolls away. Follows the system appearance (the camera is always dark).
 struct GalleryHomeView: View {
     @EnvironmentObject var appState: AppState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @StateObject private var importer = ReferencesViewModel()
 
     enum Source: Hashable { case explore, yours }
@@ -20,6 +21,7 @@ struct GalleryHomeView: View {
     @State private var showSettings = false
     @State private var showHowTo = false
     @AppStorage(FirstUseTour.exploreDoneKey) private var exploreTourDone = false
+    @AppStorage(Welcome.doneKey) private var welcomeDone = false
     @State private var tourStep: Int?
 
     /// The photos the preview pages through, the one it opens on, and (for
@@ -200,12 +202,18 @@ struct GalleryHomeView: View {
             ScrollView(.horizontal) {
                 HStack(spacing: 12) {
                     ForEach(quick) { photo in
-                        Button {
-                            recreate(photo.id)
-                        } label: {
-                            thumbnail(photo, width: 62, height: 76)
+                        // The tile's on-screen rect is where the Recreate
+                        // morph takes off from.
+                        GeometryReader { geo in
+                            Button {
+                                recreate(photo, from: geo.frame(in: .global))
+                            } label: {
+                                thumbnail(photo, width: 62, height: 76)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
+                        .frame(width: 62, height: 76)
+                        .onAppear { appState.ensureCutoutLoaded(for: photo.id) }
                         .accessibilityLabel(photo.isFavorite ? "Favorite reference" : "Recent reference")
                         .contextMenu { referenceActions(photo) } preview: { contextPreview(photo) }
                     }
@@ -368,13 +376,13 @@ struct GalleryHomeView: View {
     // MARK: Tour
 
     private var tourTrigger: String {
-        "\(exploreTourDone)-\(appState.curatedReferences.isEmpty)-\(appState.selectedTab == .references)"
+        "\(exploreTourDone)-\(welcomeDone)-\(appState.curatedReferences.isEmpty)-\(appState.selectedTab == .references)"
     }
 
     /// Explore tour: first time the curated grid is on screen (or after
     /// Replay Tutorial).
     private func startTourIfNeeded() async {
-        guard !exploreTourDone, tourStep == nil,
+        guard !exploreTourDone, welcomeDone, tourStep == nil,
               appState.selectedTab == .references,
               !appState.curatedReferences.isEmpty else { return }
         try? await Task.sleep(for: .milliseconds(600))
@@ -388,6 +396,20 @@ struct GalleryHomeView: View {
 
     private func recreate(_ id: UUID) {
         appState.useReference(id: id)
+        openCamera()
+    }
+
+    /// Quick row: the tile flies into the camera (`RecreateMorphView`).
+    private func recreate(_ photo: ReferencePhoto, from tile: CGRect) {
+        guard !appState.viewfinderFrame.isEmpty else {
+            recreate(photo.id)
+            return
+        }
+        appState.useReference(id: photo.id)
+        appState.morphReferenceID = photo.id
+        appState.recreateMorph = RecreateMorphRequest(
+            referenceID: photo.id, image: photo.image, from: tile
+        )
         openCamera()
     }
 

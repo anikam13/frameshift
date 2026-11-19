@@ -47,9 +47,11 @@ REFERENCE · CAMERA pill is removed. Camera has a native back chevron to the gal
 *Rejected:* permanent tabs (listed as an anti-pattern).
 
 **D-2 · Launch routing** — `approved`
-First launch, or no previously chosen reference → Explore gallery. Later
-fresh launches with a last-used reference → camera directly. A brief
-interruption restores the current view/session.
+Every fresh launch → the gallery home. *(Revised 2026-11-18: previously a
+returning user went straight to the camera.)* The camera stays mounted under
+the gallery and starts its session at launch, so it's already warm when the
+user taps Recreate / Resume Camera. A brief interruption restores the current
+view/session.
 
 **D-3 · Settings live in the gallery header only** — `approved`
 Not in the camera menu.
@@ -197,6 +199,19 @@ Camera control fill #242424 · selected-control tint #332B00 · coach pill
 black 72% · guide ring white 90% @ 1.5pt · shutter 78pt ring / 3pt / 66pt
 fill · thumbnail 48pt r8 with 22pt white count badge · sheet radius 24.
 
+**D-34 · Welcome screen** — `approved` *(2026-11-18)*
+First launch only (Replay Tutorial shows it again): black screen, "Welcome
+to FrameShift / Press the shutter to get started", the real shutter at its
+camera position. Behind it, a "reference wall": the bundled sample photos in
+three tilted columns drifting slowly in alternating directions (the scrolling
+collage photo apps use on welcome screens) under a faint thirds grid, falling
+off to black behind the text. *(First pass — floating framing aids on black —
+was replaced as too sparse.)* Press → haptic, the wall falls away, the shutter
+disc grows to fill the screen in the gallery's background colour and dissolves
+into the gallery; the Explore tour
+waits for it. The camera starts underneath meanwhile. Reduce Motion: still
+wall, cross-fade. Not a carousel — one screen, one action.
+
 ---
 
 ## Implementation decisions (camera phase, Nov 18 2026)
@@ -278,6 +293,24 @@ camera's mode buttons.
   controls); Settings uncapped; camera chrome glyphs stay fixed like the
   system Camera. Reduce Motion also drops the toast's slide.
 - Cleanup: onboarding images, `ExportService`, `BoundingBoxOverlay` deleted.
+
+**I-14 · Shutter latency, adaptive detection, subject-lift Recreate, Delete** — `implementation`
+- Shutter: haptic + blink on the tap (never on photo completion); taps
+  overlap (≤4 in flight); iOS 17 zero shutter lag, responsive capture and
+  fast-capture prioritization; pipeline pre-warmed with
+  `setPreparedPhotoSettingsArray` so the first shot doesn't stall.
+- Adaptive Overlay → Guides: presence = a Vision body box with confidence
+  ≥ 0.6 (was always true — a non-optional struct compared to nil).
+- Recreate (D-29) is now `RecreateMorphView`, shared by the preview, the
+  quick row, picker-sheet switches and cold launch (in place, no flight):
+  flight → scan (0.375s passes; the background is cut away behind the line
+  and the person's outline glows) repeated until the camera is running, the
+  zoom has settled and the cutout is loaded (≥ 1 pass, ≤ 2.5s) → lift over
+  the live feed → settle to the 35% overlay. The photo + scrim hide the
+  feed until then, so a starting camera is never seen. Gallery ↔ camera
+  fades with a slight scale.
+- Delete from the session gallery / viewer deletes from the camera roll
+  (stored asset id); read/write Photos access requested on first Delete.
 
 ---
 

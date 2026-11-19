@@ -14,11 +14,6 @@ struct ReferencePreviewView: View {
     @State private var showAddedToast = false
     @State private var addedToastShown = false
 
-    // Recreate morph (D-29): the photo shrinks onto the viewfinder and fades
-    // into the overlay while the camera shows through.
-    @State private var morphPhoto: ReferencePhoto?
-    @State private var morphFrame: CGRect = .zero
-    @State private var morphOpacity: Double = 1
     @State private var isLeaving = false
 
     /// Only ids still in the library (a page can be removed elsewhere).
@@ -43,33 +38,21 @@ struct ReferencePreviewView: View {
     }
 
     private var screen: some View {
-        GeometryReader { proxy in
+        GeometryReader { _ in
             ZStack {
                 Color.black
                     .opacity(isLeaving ? 0 : 1)
                     .ignoresSafeArea()
 
-                if let morphPhoto {
-                    let origin = proxy.frame(in: .global).origin
-                    Image(uiImage: morphPhoto.image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: morphFrame.width, height: morphFrame.height)
-                        .clipped()
-                        .opacity(morphOpacity)
-                        .position(x: morphFrame.midX - origin.x, y: morphFrame.midY - origin.y)
-                        .allowsHitTesting(false)
-                } else {
-                    TabView(selection: $currentID) {
-                        ForEach(photos) { photo in
-                            page(photo)
-                                .tag(Optional(photo.id))
-                        }
+                TabView(selection: $currentID) {
+                    ForEach(photos) { photo in
+                        page(photo)
+                            .tag(Optional(photo.id))
                     }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
-                    .opacity(isLeaving ? 0 : 1)
-                    .ignoresSafeArea()
                 }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .opacity(isLeaving ? 0 : 1)
+                .ignoresSafeArea()
             }
             .overlay(alignment: .topLeading) { backButton }
             .overlay(alignment: .top) { importStatus }
@@ -79,7 +62,12 @@ struct ReferencePreviewView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             currentID = request.startID
+            appState.ensureCutoutLoaded(for: request.startID)
             if !isImportPreparing { noteImportReady() }
+        }
+        // Preload the page's person cutout so Recreate's subject lift has it.
+        .onChange(of: currentID) { _, id in
+            if let id { appState.ensureCutoutLoaded(for: id) }
         }
         .onChange(of: isImportPreparing) { _, preparing in
             if !preparing { noteImportReady() }
@@ -174,59 +162,41 @@ struct ReferencePreviewView: View {
         .accessibilityHint("Opens the camera with this reference")
     }
 
-    /// Recreate: switch the (already mounted) camera to this reference, then
-    /// morph the photo onto the viewfinder and fade it into the overlay.
-    /// Reduce Motion: a plain cross-fade.
+    /// Recreate: switch the (always mounted) camera to this reference and
+    /// hand the photo to the camera-hosted `RecreateMorphView`, starting from
+    /// exactly where it's drawn here. The morph must not live in this cover:
+    /// leaving the gallery removes the view that presents it, which tore the
+    /// cover (and an in-cover morph) down instantly.
     private func recreate() {
         guard !isLeaving,
               let photo = photos.first(where: { $0.id == currentID }) ?? photos.first
         else { return }
         appState.useReference(id: photo.id)
-        appState.selectedTab = .camera
 
-        let viewfinder = appState.viewfinderFrame
-        if reduceMotion || viewfinder.isEmpty {
+        guard !appState.viewfinderFrame.isEmpty else {
+            appState.selectedTab = .camera
             withAnimation(.easeOut(duration: 0.25)) { isLeaving = true }
             finishLeaving(after: 0.25)
             return
         }
 
-        // Fly from where the photo is drawn now to exactly where the camera
-        // overlay draws it (aspect-fit in the viewfinder), so the hand-off
-        // has no jump. Both rects share the photo's aspect except the
-        // full-bleed portrait start, whose crop unwinds during the flight.
+        // Start from where the photo is drawn now: full-bleed (cropped)
+        // for portrait, aspect-fit for landscape.
         let size = photo.image.size
         let screen = UIScreen.main.bounds
         let start = size.height >= size.width
             ? screen
             : ImageContentMapper.contentRect(contentSize: size, in: screen.size, mode: .fit)
-        let fit = ImageContentMapper.contentRect(contentSize: size, in: viewfinder.size, mode: .fit)
-        let target = fit.offsetBy(dx: viewfinder.minX, dy: viewfinder.minY)
 
-        // Choreography (see docs/design-decisions.md D-29):
-        // 1. Flight — critically damped spring (no bounce: nothing was flung),
-        //    the photo goes semi-transparent as it travels so the live feed
-        //    reads through it. The overlay is held back so the person isn't
-        //    double-exposed.
-        // 2. Hand-off, slightly before the spring settles — photo fades out
-        //    while the overlay fades in, in one transaction.
-        morphPhoto = photo
-        morphFrame = start
-        morphOpacity = 1
-        appState.isRecreateMorphInFlight = true
-        withAnimation(.spring(duration: 0.45, bounce: 0)) {
-            isLeaving = true
-            morphFrame = target
-            morphOpacity = 0.6
-        }
-        Task {
-            try? await Task.sleep(for: .seconds(0.38))
-            withAnimation(.easeOut(duration: 0.25)) {
-                morphOpacity = 0
-                appState.isRecreateMorphInFlight = false
-            }
-        }
-        finishLeaving(after: 0.68)
+        isLeaving = true
+        appState.morphReferenceID = photo.id
+        appState.recreateMorph = RecreateMorphRequest(referenceID: photo.id, image: photo.image, from: start)
+        // The morph now covers this photo pixel-for-pixel, so the cover can
+        // vanish without its slide-down; the gallery fades under the morph.
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { dismiss() }
+        withAnimation(.easeOut(duration: 0.25)) { appState.selectedTab = .camera }
     }
 
     /// The cover is fully transparent by now, so its own dismissal is invisible.

@@ -27,6 +27,10 @@ struct CameraView: View {
     /// References whose "Couldn't prepare reference" card was dismissed.
     @State private var dismissedUnavailableIDs: Set<UUID> = []
     @State private var isPickerPresented = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The launch restore sets the reference before the feed first settles;
+    /// that one shouldn't animate — only switches the user makes later.
+    @State private var feedHasSettledOnce = false
     @State private var pickerDetent: PresentationDetent = ReferencePickerSheet.compactDetent
     @Namespace private var modePillNamespace
 
@@ -34,12 +38,21 @@ struct CameraView: View {
     private var isCameraMode: Bool { appState.selectedTab == .camera }
     private var cameraUsable: Bool { vm.cameraAuthorizationState != .denied }
 
+    /// Black for the camera, the gallery's color under the gallery. A fading
+    /// view is drawn only within its bounds, so mid-fade the gallery's
+    /// safe-area background (status bar, home indicator) isn't drawn — these
+    /// strips showed the camera's black for a beat. Matching the backdrop
+    /// to the destination (animated with the tab switch) removes the bar.
+    private var rootBackground: Color {
+        isCameraMode ? .black : Color(.systemBackground)
+    }
+
     var body: some View {
         content
             // Camera chrome is fixed-size like the system Camera; text that
             // does scale (coaching, cards, tours) stops at xxxLarge (D-32).
             .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-            .background(Color.black)
+            .background(rootBackground)
             // Gallery follows the system appearance; the camera is always
             // dark (D-30).
             .preferredColorScheme(isCameraMode ? .dark : nil)
@@ -52,6 +65,10 @@ struct CameraView: View {
             .onChange(of: appState.selectedTab) { _, _ in
                 vm.setCameraModeActive(isCameraMode)
             }
+            .onChange(of: vm.isFeedSettled, initial: true) { _, settled in
+                appState.isCameraFeedSettled = settled
+                if settled { feedHasSettledOnce = true }
+            }
             .onChange(of: appState.isBackgroundVisionBusy) { _, busy in
                 vm.setLiveVisionSuspended(busy)
             }
@@ -59,6 +76,16 @@ struct CameraView: View {
                 // A new reference restarts adaptation; the session carries on.
                 vm.updateActiveSpec(activeSpec)
                 if let id { appState.ensureCutoutLoaded(for: id) }
+                if let id { scanInPlace(referenceID: id) }
+            }
+            .onChange(of: appState.recreateMorph?.id, initial: true) { _, id in
+                guard id != nil, vm.cameraAuthorizationState != .authorized else { return }
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    appState.morphReferenceID = nil
+                    appState.recreateMorph = nil
+                }
             }
             .onChange(of: appState.activeReference?.spec) { _, _ in
                 vm.updateActiveSpec(activeSpec)
@@ -104,6 +131,11 @@ struct CameraView: View {
     private var content: some View {
         ZStack {
             cameraScreen
+                // Before access is decided there's no feed: keep the chrome
+                // (mounted, but invisible) from flashing under the
+                // explanation as it fades in or out.
+                .opacity(vm.cameraAuthorizationState == .notDetermined
+                         || vm.cameraAuthorizationState == .unknown ? 0 : 1)
                 .overlayPreferenceValue(TourAnchorKey.self) { anchors in
                     TourOverlay(steps: FirstUseTour.camera, index: $cameraTourStep, anchors: anchors) {
                         cameraTourDone = true
@@ -127,8 +159,31 @@ struct CameraView: View {
                 .accessibilityHidden(!isCameraMode)
 
             if !isCameraMode {
+                // Cross-fade; the backdrop color animates with it.
                 referencesScreen
                     .transition(.opacity)
+            }
+
+            // No live camera to land on (access not granted yet / denied):
+            // the permission screen shows instead, so skip the hand-off.
+            if let morph = appState.recreateMorph, vm.cameraAuthorizationState == .authorized {
+                RecreateMorphView(
+                    request: morph,
+                    cutout: appState.references.first { $0.id == morph.referenceID }?.personCutout,
+                    isReady: appState.isCameraFeedSettled && appState.isOverlayReady(for: morph.referenceID),
+                    viewfinder: appState.viewfinderFrame,
+                    overlayOpacity: referenceOverlayOpacity
+                ) {
+                    // A newer switch may have replaced this morph already.
+                    guard appState.recreateMorph?.id == morph.id else { return }
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        appState.morphReferenceID = nil
+                        appState.recreateMorph = nil
+                    }
+                }
+                .id(morph.id)
             }
         }
     }
@@ -164,7 +219,7 @@ struct CameraView: View {
             }
             captureControls
         }
-        .background(Color.black.ignoresSafeArea())
+        .background(rootBackground.ignoresSafeArea())
         .animation(.easeOut(duration: 0.2), value: activeNotice?.message)
     }
 
@@ -595,6 +650,7 @@ struct CameraView: View {
             ShutterButton(
                 isBursting: vm.isBursting,
                 burstCount: vm.burstCount,
+                onPressDown: { vm.prepareShutter() },
                 onTap: { capture() },
                 onHoldStart: { startBurst() },
                 onHoldEnd: { vm.stopBurst() }
@@ -701,6 +757,32 @@ struct CameraView: View {
             guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.3)) { showSavedCaption = false }
         }
+    }
+
+    // MARK: Reference switch scan
+
+    /// Switching reference while in the camera (picker sheet) plays the same
+    /// scan → lift → settle as Recreate, in place over the viewfinder, so the
+    /// new overlay never pops in half-loaded. Recreate / quick-row switches
+    /// already run their own morph (flag set), and Reduce Motion keeps the
+    /// plain swap.
+    private func scanInPlace(referenceID id: UUID) {
+        #if DEBUG
+        print("[scan] switch ref=\(id.uuidString.prefix(6)) cameraMode=\(isCameraMode) morphing=\(appState.morphReferenceID?.uuidString.prefix(6) ?? "nil") viewfinder=\(appState.viewfinderFrame) reduceMotion=\(reduceMotion)")
+        #endif
+        // Skip only when this exact reference is already morphing (Recreate /
+        // quick row set it before switching). A different in-flight morph is
+        // replaced — rapid switches always show the latest reference.
+        guard isCameraMode,
+              feedHasSettledOnce,
+              appState.morphReferenceID != id,
+              !appState.viewfinderFrame.isEmpty,
+              let ref = appState.references.first(where: { $0.id == id })
+        else { return }
+        appState.morphReferenceID = id
+        appState.recreateMorph = RecreateMorphRequest(
+            referenceID: id, image: ref.image, inPlace: true
+        )
     }
 
     // MARK: Gallery home

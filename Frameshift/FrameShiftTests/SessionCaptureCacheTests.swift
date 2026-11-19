@@ -49,6 +49,27 @@ struct SessionCaptureCacheTests {
         cache.removeAll()
     }
 
+    @Test func photosAssetIDSurvivesRestore() {
+        let id = UUID()
+        let cache = SessionCaptureCache()
+        cache.removeAll()
+        cache.saveImageData(jpeg(), id: id)
+        cache.saveManifest(.init(
+            lastCaptureAt: Date(),
+            shots: [.init(id: id, capturedAt: Date(), referenceID: nil, burstID: nil,
+                          isBurstBest: false, photosAssetID: "ABC/L0/001")]
+        ))
+        #expect(cache.restoreOpenSession(limit: 30 * 60)?.shots.first?.shot.photosAssetID == "ABC/L0/001")
+        cache.removeAll()
+    }
+
+    /// Manifests written before Delete (1.2) have no asset id and must still load.
+    @Test func legacyManifestWithoutAssetIDDecodes() throws {
+        let json = #"{"lastCaptureAt":0,"shots":[{"id":"\#(UUID().uuidString)","capturedAt":0,"isBurstBest":false}]}"#
+        let manifest = try JSONDecoder().decode(SessionCaptureCache.Manifest.self, from: Data(json.utf8))
+        #expect(manifest.shots.first?.photosAssetID == nil)
+    }
+
     @Test func noManifestMeansNoSession() {
         let cache = SessionCaptureCache()
         cache.removeAll()

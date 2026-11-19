@@ -31,7 +31,27 @@ class AppState: ObservableObject {
     var viewfinderFrame: CGRect = .zero
     /// True while the Recreate morph is flying onto the viewfinder. The camera
     /// holds the overlay back until it lands so the person isn't shown twice.
-    @Published var isRecreateMorphInFlight = false
+    @Published var morphReferenceID: UUID?
+    var isRecreateMorphInFlight: Bool { morphReferenceID != nil }
+    /// Mirrors `CameraViewModel.isFeedSettled` for the Recreate scan, which
+    /// can be hosted outside the camera (the preview cover).
+    @Published var isCameraFeedSettled = false
+
+    /// Is this reference's overlay final? True once its cutout is in memory,
+    /// or when no cutout is coming (analysis failed). An unanalyzed import
+    /// stays false — the scan's timeout covers it.
+    func isOverlayReady(for id: UUID) -> Bool {
+        guard let ref = references.first(where: { $0.id == id }) else { return true }
+        return ref.personCutout != nil || ref.analysisFailed || cutoutLookupDone.contains(id)
+    }
+
+    /// References whose on-disk cutout lookup finished — found or not (no
+    /// person segmented). Lets the reveal stop waiting for a cutout that
+    /// doesn't exist.
+    @Published private(set) var cutoutLookupDone: Set<UUID> = []
+
+    /// Quick-row Recreate: the camera hosts the morph above the gallery.
+    @Published var recreateMorph: RecreateMorphRequest?
 
     /// True while import/restore Vision work is in flight. Camera pauses live
     /// subject detection against this so preview isn't starved.
@@ -264,7 +284,8 @@ class AppState: ObservableObject {
                 lastCaptureAt: last,
                 shots: capturedShots.filter { ids.contains($0.id) }.map {
                     .init(id: $0.id, capturedAt: $0.capturedAt, referenceID: $0.referenceID,
-                          burstID: $0.burstID, isBurstBest: $0.isBurstBest)
+                          burstID: $0.burstID, isBurstBest: $0.isBurstBest,
+                          photosAssetID: $0.photosAssetID)
                 }
             )
         } else {
@@ -289,7 +310,10 @@ class AppState: ObservableObject {
         persistSessionManifest()
     }
 
-    private func noteSessionSaved(id: UUID) {
+    private func noteSessionSaved(id: UUID, photosAssetID: String?) {
+        if let index = capturedShots.firstIndex(where: { $0.id == id }) {
+            capturedShots[index].photosAssetID = photosAssetID
+        }
         rollSessionIfStale()
         lastSessionCaptureAt = Date()
         sessionShotIDs.insert(id, at: 0)
@@ -303,10 +327,15 @@ class AppState: ObservableObject {
               references[index].spec != nil,
               !references[index].analysisFailed
         else { return }
-        Task.detached(priority: .utility) { [store] in
+        // User-initiated: it gates the Recreate reveal.
+        Task.detached(priority: .userInitiated) { [store] in
             let cutout = store.loadCutout(id: id)
-            guard let cutout else { return }
+            guard let cutout else {
+                await MainActor.run { _ = self.cutoutLookupDone.insert(id) }
+                return
+            }
             await MainActor.run {
+                self.cutoutLookupDone.insert(id)
                 guard let idx = self.references.firstIndex(where: { $0.id == id }),
                       self.references[idx].personCutout == nil
                 else { return }
@@ -360,12 +389,9 @@ class AppState: ObservableObject {
         }
 
         let activeID = references[activeReferenceIndex].id
-        // Launch routing (design decision D-2): a returning user with a
-        // previously chosen reference goes straight to the camera; everyone
-        // else lands on the gallery.
-        if references.contains(where: { $0.lastUsedAt != nil }) {
-            selectedTab = .camera
-        }
+        // Launch routing (D-2, revised): always open on the gallery. The
+        // camera stays mounted underneath and starts its session now, so it's
+        // warm by the time the user taps Recreate / Resume Camera.
         // Ghost overlay only needs the active cutout on camera entry.
         if restored.references.contains(where: { $0.id == activeID && $0.hasCutoutOnDisk }) {
             ensureCutoutLoaded(for: activeID)
@@ -669,7 +695,7 @@ class AppState: ObservableObject {
                 switch result {
                 // Only a confirmed Photos save counts toward the session —
                 // a failed save must not read as saved.
-                case .saved:              self.noteSessionSaved(id: shot.id)
+                case .saved(let assetID): self.noteSessionSaved(id: shot.id, photosAssetID: assetID)
                 case .deniedOrRestricted: self.notePhotoLibraryDenied()
                 case .failed:             self.failedSaveShotID = shot.id
                 }
@@ -689,7 +715,7 @@ class AppState: ObservableObject {
             guard let image = await loadFullShot(id: id) ?? capturedShots.first(where: { $0.id == id })?.image
             else { return }
             switch await PhotoLibrarySaver.save(image) {
-            case .saved:              noteSessionSaved(id: id)
+            case .saved(let assetID): noteSessionSaved(id: id, photosAssetID: assetID)
             case .deniedOrRestricted: notePhotoLibraryDenied()
             case .failed:             failedSaveShotID = id
             }
@@ -708,6 +734,33 @@ class AppState: ObservableObject {
         references[index].analysisFailed = false
         references[index].spec = nil
         scheduleRestoreAnalysis(activeID: id, queuedIDs: [], yieldForCamera: false)
+    }
+
+    enum CaptureDeleteOutcome: Equatable {
+        case deleted(Int)
+        /// The user tapped Don't Allow on the system delete confirmation.
+        case cancelled
+        case photosDenied
+        case failed
+    }
+
+    /// Deletes shots from the camera roll (the system asks to confirm; they
+    /// go to Recently Deleted) and then from the session. Shots whose save
+    /// never landed have no asset and are only removed from the session.
+    func deleteCapturedShots(ids: [UUID]) async -> CaptureDeleteOutcome {
+        let wanted = Set(ids)
+        let shots = capturedShots.filter { wanted.contains($0.id) }
+        guard !shots.isEmpty else { return .deleted(0) }
+        switch await PhotoLibrarySaver.deleteAssets(localIdentifiers: shots.compactMap(\.photosAssetID)) {
+        case .deleted:
+            capturedShots.removeAll { wanted.contains($0.id) }
+            syncSessionIDs()
+            deleteCachedCaptures(shots.map(\.id))
+            return .deleted(shots.count)
+        case .cancelled:          return .cancelled
+        case .deniedOrRestricted: return .photosDenied
+        case .failed:             return .failed
+        }
     }
 
     func removeCapturedShot(id: UUID) {
@@ -757,7 +810,8 @@ class AppState: ObservableObject {
             CapturedPhoto(
                 id: $0.shot.id, image: $0.image, capturedAt: $0.shot.capturedAt,
                 referenceID: $0.shot.referenceID, burstID: $0.shot.burstID,
-                isBurstBest: $0.shot.isBurstBest
+                isBurstBest: $0.shot.isBurstBest,
+                photosAssetID: $0.shot.photosAssetID
             )
         }
         sessionShotIDs = capturedShots.map(\.id)

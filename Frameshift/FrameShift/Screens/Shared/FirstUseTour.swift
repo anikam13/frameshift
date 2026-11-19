@@ -11,6 +11,7 @@ enum FirstUseTour {
     static func reset() {
         UserDefaults.standard.set(false, forKey: exploreDoneKey)
         UserDefaults.standard.set(false, forKey: cameraDoneKey)
+        UserDefaults.standard.set(false, forKey: Welcome.doneKey)
     }
 
     struct Step {

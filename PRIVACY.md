@@ -18,6 +18,7 @@ FrameShift requests two separate, limited permissions:
 
 - **Importing reference photos**: handled through Apple's system photo picker, which runs outside of FrameShift's process. FrameShift only ever receives the specific photos you choose to import — it never receives broad access to your photo library.
 - **Saving your photos**: FrameShift saves the photos you take to your camera roll. This is "add-only" access — FrameShift cannot read, browse, or modify the rest of your photo library.
+- **Deleting your photos**: if you choose Delete on a photo you took in FrameShift, iOS asks you to allow photo library access and then to confirm the deletion. FrameShift uses this access only to delete the specific photos it saved for you (they go to Recently Deleted); it never reads, browses, or uploads the rest of your library.
 
 ## On-Device Processing
 
@@ -25,7 +26,7 @@ When you import a reference photo, FrameShift uses Apple's Vision framework to a
 
 ## Data Storage
 
-Reference photos and your app settings are stored locally in FrameShift's private storage on your device. Photos you take are saved to your camera roll; FrameShift keeps only a temporary copy while your shooting session is open, deleted when the session ends or the app restarts. Nothing is synced to iCloud or any external server by FrameShift itself.
+Reference photos and your app settings are stored locally in FrameShift's private storage on your device. Photos you take are saved to your camera roll; FrameShift keeps only a temporary copy while your shooting session is open, deleted when the session ends (30 minutes after your last photo). Nothing is synced to iCloud or any external server by FrameShift itself.
 
 ## Data Deletion
 

@@ -2,9 +2,21 @@ import SwiftUI
 
 /// App shell. `CameraView` hosts both surfaces: the gallery home
 /// (`selectedTab == .references`) layered over an always-mounted camera.
-/// Launch routing (D-2) sets `selectedTab` in `AppState.restoreReferences`.
+/// Launch always lands on the gallery (D-2); first launch shows the
+/// welcome on top while the camera starts underneath (D-34).
 struct RootTabView: View {
+    @AppStorage(Welcome.doneKey) private var welcomeDone = false
+
     var body: some View {
-        CameraView()
+        ZStack {
+            CameraView()
+            if !welcomeDone {
+                WelcomeView {
+                    withAnimation(.easeOut(duration: 0.25)) { welcomeDone = true }
+                }
+                .transition(.opacity)
+                .zIndex(1)
+            }
+        }
     }
 }

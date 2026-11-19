@@ -97,6 +97,12 @@ struct SessionViewerView: View {
                         ) {
                             Label("Share", systemImage: "square.and.arrow.up")
                         }
+                        Divider()
+                        Button(role: .destructive) {
+                            delete(item)
+                        } label: {
+                            Label(item.isBurst ? "Delete Burst" : "Delete", systemImage: "trash")
+                        }
                     } label: {
                         Image(systemName: "ellipsis")
                             .font(.system(.body, weight: .medium))
@@ -172,6 +178,34 @@ struct SessionViewerView: View {
         }
         .padding(.top, 16)
         .padding(.bottom, 20)
+    }
+
+    /// Deletes from Photos (iOS confirms), then moves to a neighbor — or
+    /// closes when the session is empty.
+    private func delete(_ item: GalleryItem) {
+        let all = items
+        let index = all.firstIndex { $0.id == item.id } ?? 0
+        let neighbor = all.indices.contains(index + 1) ? all[index + 1].id
+            : (index > 0 ? all[index - 1].id : nil)
+        Task {
+            switch await appState.deleteCapturedShots(ids: item.shots.map(\.id)) {
+            case .deleted:
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                if let neighbor { currentID = neighbor } else { dismiss() }
+            case .cancelled:
+                break
+            case .photosDenied:
+                await flash("Allow Photos access in Settings to delete")
+            case .failed:
+                await flash("Couldn’t delete")
+            }
+        }
+    }
+
+    private func flash(_ message: String) async {
+        toast = message
+        try? await Task.sleep(for: .seconds(2))
+        if toast == message { toast = nil }
     }
 
     private func saveAsReference(_ shot: CapturedPhoto) {

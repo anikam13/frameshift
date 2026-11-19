@@ -172,11 +172,28 @@ class CameraViewModel: ObservableObject {
     /// Debounces the single-shot path: a fast double-tap on the shutter
     /// shouldn't queue a second full-quality capture before the first's
     /// completion runs. Burst bypasses this and overlaps captures on purpose.
-    private var isCapturing = false
+    /// Single-tap captures still processing. Taps overlap like the native
+    /// Camera; the cap only stops a runaway queue on a stalled pipeline.
+    private var inflightTapCaptures = 0
+    /// Kept prepared so the shutter haptic lands on the same frame as the tap.
+    private let shutterHaptic = UIImpactFeedbackGenerator(style: .medium)
     /// Suspended while AppState runs restore/import Vision so live pose
     /// doesn't contend with the Neural Engine for the preview pipeline.
     private var liveVisionSuspended = false
     private var cancellables = Set<AnyCancellable>()
+
+    /// The live feed is running and done with any reference zoom ramp — the
+    /// Recreate scan holds until this is true so the camera is revealed
+    /// already steady, never mid-start or mid-zoom.
+    @Published private(set) var isFeedSettled = false
+    private var isSessionRunning = false
+    private var isZoomSettling = false
+    private var zoomSettleTask: Task<Void, Never>?
+
+    private func updateFeedSettled() {
+        let settled = isSessionRunning && !isZoomSettling
+        if isFeedSettled != settled { isFeedSettled = settled }
+    }
 
     /// Seeds the drawer toggles from Settings' persisted defaults. The
     /// in-drawer toggle itself stays session-only and never writes back —
@@ -398,22 +415,27 @@ class CameraViewModel: ObservableObject {
         camera.setZoom(zoomFactor)
     }
 
+    /// Feedback is immediate — haptic and blink fire on the tap, never on
+    /// photo completion (full-quality processing can take ~1s). Processing
+    /// runs in the background while the user keeps shooting.
     func capturePhoto(completion: @escaping (UIImage?) -> Void) {
-        guard !isCapturing else { return }
-        isCapturing = true
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        guard inflightTapCaptures < 4 else { return }
+        inflightTapCaptures += 1
+        shutterHaptic.impactOccurred()
+        triggerShutterBlink()
+        shutterHaptic.prepare()
         camera.capturePhoto(flashMode: flashMode) { [weak self] image in
             DispatchQueue.main.async {
-                self?.isCapturing = false
-                if image == nil {
-                    self?.showCaptureFailureNotice()
-                } else {
-                    self?.triggerShutterBlink()
-                }
+                guard let self else { return }
+                self.inflightTapCaptures = max(0, self.inflightTapCaptures - 1)
+                if image == nil { self.showCaptureFailureNotice() }
                 completion(image)
             }
         }
     }
+
+    /// Warm the Taptic Engine when the finger lands on the shutter.
+    func prepareShutter() { shutterHaptic.prepare() }
 
     /// Fires captures on a fixed 0.1s cadence while the shutter is held — the
     /// native app's burst rate — overlapping captures instead of waiting for
@@ -544,6 +566,15 @@ class CameraViewModel: ObservableObject {
            abs(zoomFactor - spec.recommendedZoom) > 0.01 {
             zoomFactor = spec.recommendedZoom
             camera.setZoom(spec.recommendedZoom, animated: true)
+            isZoomSettling = true
+            updateFeedSettled()
+            zoomSettleTask?.cancel()
+            zoomSettleTask = Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(450))   // ramp + margin
+                guard let self, !Task.isCancelled else { return }
+                self.isZoomSettling = false
+                self.updateFeedSettled()
+            }
         }
     }
 
@@ -553,7 +584,10 @@ class CameraViewModel: ObservableObject {
             self.liveDetection = subject
             self.liveContentSize = contentSize
             self.lightingScore = lighting
-            self.advanceAdaptation(subjectPresent: subject != nil)
+            // `subject` is a value, never nil — presence is a detected body
+            // box. (Comparing the struct to nil was always true, so Overlay
+            // flipped to Guides 1.5s after opening even with nobody there.)
+            self.advanceAdaptation(subjectPresent: subject.box != nil)
             self.evaluateCoaching()
         }
         camera.onVideoFrame = { [weak self] buffer in
@@ -639,6 +673,25 @@ class CameraViewModel: ObservableObject {
         camera.$authorizationState
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in self?.cameraAuthorizationState = state }
+            .store(in: &cancellables)
+
+        camera.$isRunning
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] running in
+                guard let self else { return }
+                if running {
+                    // First frames reach the preview a beat after startRunning.
+                    Task { [weak self] in
+                        try? await Task.sleep(for: .milliseconds(150))
+                        guard let self, self.camera.isRunning else { return }
+                        self.isSessionRunning = true
+                        self.updateFeedSettled()
+                    }
+                } else {
+                    self.isSessionRunning = false
+                    self.updateFeedSettled()
+                }
+            }
             .store(in: &cancellables)
     }
 

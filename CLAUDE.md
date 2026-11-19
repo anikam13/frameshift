@@ -124,8 +124,8 @@ FrameShift/                                 // workspace root
   renders inside `CameraView` when `selectedTab == .references`, layered over
   the camera — the camera stays mounted so `ViewfinderView` is never rebuilt
   (re-attaching the preview layer inside a layout pass hangs the main thread).
-- Launch: gallery home on first use; straight to the camera once any reference
-  has `lastUsedAt`. An empty library seeds the bundled samples (Explore).
+- Launch: always the gallery home; the camera session starts underneath so it's
+  warm on Recreate / Resume Camera (D-2). An empty library seeds the bundled samples (Explore).
 - Gallery home: header (Resume Camera, `+` import, `⋯` → Settings / How to Use),
   quick row, Explore/Yours switch + chips, 2-column grid. Tap → full-bleed
   `ReferencePreviewView` → **Recreate** (→ camera). Import opens the preview
@@ -142,7 +142,8 @@ FrameShift/                                 // workspace root
   only (already in Photos), bursts collapse to one tile → `BurstReviewView`
   (Set as Cover); singles → `SessionViewerView` (hold or Compare toggles the
   reference). Select → Add to References / Share.
-- First use: no onboarding carousel. `FirstUseTour` spotlight cards — Explore
+- First use: `WelcomeView` (one screen, press the shutter to start, D-34), then no
+  onboarding carousel — `FirstUseTour` spotlight cards — Explore
   (2 steps) on the gallery, Camera (4 steps) once camera access is granted.
   Settings → Replay Tutorial resets both.
 - Camera access: `CameraAccessExplanationView` before the system prompt
@@ -188,6 +189,11 @@ FrameShift/                                 // workspace root
 drives the white count badge on the bottom-left thumbnail. A session ends after
 `sessionInactivityLimit` (30 min, provisional) without a capture; reference
 switches never reset it. Deleting a shot removes it from the count.
+
+Delete (session gallery selection bar, viewer `⋯`) removes the shot from the
+camera roll via its stored `photosAssetID` (`PhotoLibrarySaver.deleteAssets`).
+Read/write Photos access is requested only at the first Delete; iOS confirms
+and keeps the photo in Recently Deleted.
 
 Zoom fine-adjust: drag sideways on the zoom row (left = in), haptic tick per lens; VoiceOver adjustable.
 
@@ -258,12 +264,12 @@ Redesign tokens: `cameraControl` #242424 (zoom selection, flip),
 
 ```
 NSCameraUsageDescription — FrameShift needs camera access to help you recreate reference shots.
-NSPhotoLibraryUsageDescription — FrameShift needs photo access to import reference photos.
+NSPhotoLibraryUsageDescription — FrameShift needs this access only to delete photos you took with FrameShift when you choose Delete. It never reads the rest of your library.
 NSPhotoLibraryAddUsageDescription — FrameShift saves your photos to your camera roll.
 ITSAppUsesNonExemptEncryption — NO
 ```
 
-Import uses the system photo picker (no broad library read). Saving uses add-only access.
+Import uses the system photo picker (no broad library read). Saving uses add-only access; read/write is requested only when the user deletes a capture.
 
 ---
 
