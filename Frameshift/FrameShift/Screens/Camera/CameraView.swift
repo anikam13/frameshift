@@ -329,13 +329,20 @@ struct CameraView: View {
     /// the menu while it's opening (which made it flaky). Aspect ratio is
     /// listed inline — no submenu to open.
     private var moreMenu: some View {
-        CameraMoreMenu(
+        #if DEBUG
+        let isEvalVisible = vm.isEvalHUDVisible
+        let setEval: (Bool) -> Void = { vm.isEvalHUDVisible = $0 }
+        #else
+        let isEvalVisible = false
+        let setEval: (Bool) -> Void = { _ in }
+        #endif
+        return CameraMoreMenu(
             isGridVisible: vm.isGridVisible,
             captureAspect: vm.captureAspect,
-            isEvalHUDVisible: vm.isEvalHUDVisible,
+            isEvalHUDVisible: isEvalVisible,
             setGrid: { vm.isGridVisible = $0 },
             setAspect: { vm.captureAspect = $0 },
-            setEval: { vm.isEvalHUDVisible = $0 }
+            setEval: setEval
         )
         .equatable()
         .disabled(!cameraUsable)
