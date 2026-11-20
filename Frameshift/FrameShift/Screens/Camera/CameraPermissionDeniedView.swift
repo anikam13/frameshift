@@ -65,11 +65,6 @@ struct CameraAccessExplanationView: View {
                 Text("Enable your camera")
                     .font(.system(.title2, weight: .bold))
                     .foregroundStyle(Color(hex: "#1C1C1E"))
-                Text("FrameShift needs camera access to help you frame and take your shot.")
-                    .font(.system(.body))
-                    .foregroundStyle(Color(hex: "#636366"))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 12)
 
                 Button(action: onContinue) {
                     Text("Continue")

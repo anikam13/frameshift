@@ -175,6 +175,9 @@ class AppState: ObservableObject {
             activeReferenceIndex = index
             persistManifest()
             ensureCutoutLoaded(for: id)
+            #if DEBUG && targetEnvironment(simulator)
+            SimulatedCameraFeed.shared?.follow(reference: references[index].image)
+            #endif
         }
     }
 
@@ -484,6 +487,12 @@ class AppState: ObservableObject {
         }
 
         Task(priority: .utility) {
+            // First launch: the welcome screen's animations share the GPU
+            // with Vision/segmentation, which made them stutter. Analysis
+            // starts once it's gone (the yield below covers its hand-off).
+            while !UserDefaults.standard.bool(forKey: Welcome.doneKey) {
+                try? await Task.sleep(for: .milliseconds(300))
+            }
             await performVisionWork {
                 // Let AVCaptureSession.startRunning claim the first beat.
                 if yieldForCamera {

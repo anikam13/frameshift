@@ -50,11 +50,11 @@ final class FrameShiftUITests: XCTestCase {
     @MainActor
     func testExploreTourStepsThrough() throws {
         let app = launch(tours: true)
-        XCTAssertTrue(app.staticTexts["Start with a photo"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Pick a photo"].waitForExistence(timeout: 5))
         app.buttons["Next"].tap()
-        XCTAssertTrue(app.staticTexts["Use your own photo"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Or use your own"].waitForExistence(timeout: 3))
         app.buttons["Got It"].tap()
-        XCTAssertTrue(app.staticTexts["Use your own photo"].waitForNonExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Or use your own"].waitForNonExistence(timeout: 3))
     }
 
     @MainActor

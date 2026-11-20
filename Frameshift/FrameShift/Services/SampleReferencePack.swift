@@ -34,4 +34,19 @@ enum SampleReferencePack {
         "SampleRefStoneLean":       [.fullBody],
         "SampleRefSofaProfile":     [.fullBody, .seated],
     ]
+
+    /// Explore's Women / Men toggle. Hand-assigned like `tags`.
+    enum Subject: Hashable { case women, men }
+    static let subjects: [String: Subject] = [
+        "SampleRefCinqueFloral":    .women,
+        "SampleRefAlleyWhite":      .women,
+        "SampleRefCoastalDress":    .women,
+        "SampleRefPatioGlance":     .women,
+        "SampleRefDinnerTable":     .women,
+        "SampleRefPromenadeGlance": .women,
+        "SampleRefBeachWalk":       .men,
+        "SampleRefCafeSip":         .men,
+        "SampleRefStoneLean":       .men,
+        "SampleRefSofaProfile":     .men,
+    ]
 }

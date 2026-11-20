@@ -4,8 +4,8 @@ import UniformTypeIdentifiers
 
 /// Session gallery (Paper page "03 · Session & viewer"). This shoot's photos,
 /// already saved to Apple Photos — not a second archive (D-25). Bursts
-/// collapse to one tile with a count badge. Select → Add to References or
-/// Share. Opened from the camera's session thumbnail; the camera glyph
+/// collapse to one tile with a count badge. Select (tap, or drag across
+/// tiles) → Add to References, Share or Delete. Opened from the camera's session thumbnail; the camera glyph
 /// returns to the camera.
 struct SessionGalleryView: View {
     @EnvironmentObject var appState: AppState
@@ -18,6 +18,14 @@ struct SessionGalleryView: View {
     @State private var burstReview: GalleryItem?
     @State private var toast: String?
     @State private var isAdding = false
+
+    // Drag to select (Photos-style): a sideways start on a tile begins a
+    // range selection from that tile to the one under the finger.
+    @State private var tileFrames: [UUID: CGRect] = [:]
+    @State private var dragAnchor: Int?
+    @State private var dragSelects = true
+    @State private var dragBaseline: Set<UUID> = []
+    @State private var dragDecided = false
 
     struct ViewerRequest: Identifiable {
         let id = UUID()
@@ -56,10 +64,22 @@ struct SessionGalleryView: View {
                     LazyVGrid(columns: columns, spacing: 4) {
                         ForEach(items) { item in
                             tile(item)
+                                .background {
+                                    GeometryReader { g in
+                                        Color.clear.preference(
+                                            key: TileFramesKey.self,
+                                            value: [item.id: g.frame(in: .named("sessionGrid"))]
+                                        )
+                                    }
+                                }
                         }
                     }
+                    .coordinateSpace(name: "sessionGrid")
+                    .onPreferenceChange(TileFramesKey.self) { tileFrames = $0 }
+                    .simultaneousGesture(dragSelect, including: isSelecting ? .all : .subviews)
                     .padding(.bottom, 24)
                 }
+                .scrollDisabled(dragAnchor != nil)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -182,6 +202,43 @@ struct SessionGalleryView: View {
             .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
+    // MARK: Drag to select
+
+    private var dragSelect: some Gesture {
+        DragGesture(minimumDistance: 10, coordinateSpace: .named("sessionGrid"))
+            .onChanged { value in
+                if !dragDecided {
+                    dragDecided = true
+                    // Mostly-vertical starts are scrolls, not selections.
+                    let t = value.translation
+                    guard abs(t.width) > abs(t.height),
+                          let start = itemIndex(at: value.startLocation) else { return }
+                    dragAnchor = start
+                    dragBaseline = selectedIDs
+                    dragSelects = !selectedIDs.contains(items[start].id)
+                }
+                guard let anchor = dragAnchor,
+                      let current = itemIndex(at: value.location) else { return }
+                var next = dragBaseline
+                for index in min(anchor, current)...max(anchor, current) {
+                    let id = items[index].id
+                    if dragSelects { next.insert(id) } else { next.remove(id) }
+                }
+                if next != selectedIDs {
+                    selectedIDs = next
+                    UISelectionFeedbackGenerator().selectionChanged()
+                }
+            }
+            .onEnded { _ in
+                dragAnchor = nil
+                dragDecided = false
+            }
+    }
+
+    private func itemIndex(at point: CGPoint) -> Int? {
+        items.firstIndex { tileFrames[$0.id]?.contains(point) == true }
+    }
+
     private var emptyState: some View {
         VStack(spacing: 10) {
             Text("No photos yet")
@@ -299,6 +356,13 @@ struct SessionGalleryView: View {
 }
 
 // MARK: - Shared pieces
+
+private struct TileFramesKey: PreferenceKey {
+    static let defaultValue: [UUID: CGRect] = [:]
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue()) { $1 }
+    }
+}
 
 /// Photos-style selection circle: white ring, or filled blue check.
 struct SelectionMark: View {

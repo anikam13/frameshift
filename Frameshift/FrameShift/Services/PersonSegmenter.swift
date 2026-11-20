@@ -55,6 +55,9 @@ nonisolated struct PersonSegmenter {
 
         let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
         do {
+            #if targetEnvironment(simulator)
+            VNRequest.simulatorCPU([instanceRequest, personRequest])
+            #endif
             try handler.perform([instanceRequest, personRequest])
         } catch {
             return nil

@@ -87,6 +87,18 @@ struct CameraView: View {
                     appState.recreateMorph = nil
                 }
             }
+            // First Recreate goes through the camera-access screen, which
+            // drops the morph. Once access is granted, play the in-place
+            // scan for that reference so the first one isn't a plain pop-in.
+            .onChange(of: vm.cameraAuthorizationState) { old, new in
+                guard old == .notDetermined, new == .authorized, isCameraMode,
+                      !reduceMotion,
+                      let ref = appState.activeReference else { return }
+                appState.morphReferenceID = ref.id
+                appState.recreateMorph = RecreateMorphRequest(
+                    referenceID: ref.id, image: ref.image, inPlace: true
+                )
+            }
             .onChange(of: appState.activeReference?.spec) { _, _ in
                 vm.updateActiveSpec(activeSpec)
             }
@@ -277,67 +289,55 @@ struct CameraView: View {
         .animation(.easeOut(duration: 0.2), value: vm.isFocused)
     }
 
-    /// Thumbnail + chevron. Tap thumbnail = Manual Overlay toggle (same as
-    /// the Overlay button); hold = peek the full reference; chevron = picker.
+    /// Thumbnail + chevron, one control: tap = reference picker (quick
+    /// switch); hold = peek the full reference. Overlay on/off lives on the
+    /// Overlay button only.
     private var referenceControl: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 2) {
             Group {
                 if let ref = appState.activeReference {
                     Image(uiImage: ref.image)
                         .resizable()
                         .scaledToFill()
-                        .frame(width: 36, height: 44)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                        .contentShape(Rectangle())
-                        .gesture(referenceThumbPressGesture)
-                        .accessibilityLabel("Reference photo")
-                        .accessibilityHint("Toggles the reference overlay")
-                        .accessibilityAddTraits(.isButton)
-                        .accessibilityAction { vm.toggleOverlayMode() }
                 } else {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.white.opacity(0.12))
-                        .frame(width: 36, height: 44)
+                    Color.white.opacity(0.12)
                         .overlay(
                             Image(systemName: "photo")
                                 .font(.system(size: 14))
                                 .foregroundStyle(.white.opacity(0.7))
                         )
-                        .onTapGesture { openPicker() }
                 }
             }
+            .frame(width: 36, height: 44)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
 
-            iconButton(systemName: "chevron.down", label: "Choose reference") {
-                openPicker()
-            }
+            Image(systemName: "chevron.down")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 22, height: 44)
         }
+        .padding(.horizontal, 4)
+        .contentShape(Rectangle())
+        .gesture(referenceThumbPressGesture)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Choose reference")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { openPicker() }
     }
 
+    /// Isolated so the camera's frequent view-model updates don't rebuild
+    /// the menu while it's opening (which made it flaky). Aspect ratio is
+    /// listed inline — no submenu to open.
     private var moreMenu: some View {
-        Menu {
-            Toggle(isOn: $vm.isGridVisible) {
-                Label("Grid", systemImage: "grid")
-            }
-            Picker(selection: $vm.captureAspect) {
-                Text("4:3 · Posts").tag(CameraViewModel.CaptureAspect.fourThree)
-                Text("16:9 · Stories").tag(CameraViewModel.CaptureAspect.sixteenNine)
-            } label: {
-                Label("Aspect Ratio", systemImage: "aspectratio")
-            }
-            .pickerStyle(.menu)
-            #if DEBUG
-            Toggle(isOn: $vm.isEvalHUDVisible) {
-                Label("Coaching Eval", systemImage: "gauge.with.dots.needle.33percent")
-            }
-            #endif
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 18, weight: .regular))
-                .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-        }
-        .accessibilityLabel("More camera options")
+        CameraMoreMenu(
+            isGridVisible: vm.isGridVisible,
+            captureAspect: vm.captureAspect,
+            isEvalHUDVisible: vm.isEvalHUDVisible,
+            setGrid: { vm.isGridVisible = $0 },
+            setAspect: { vm.captureAspect = $0 },
+            setEval: { vm.isEvalHUDVisible = $0 }
+        )
+        .equatable()
         .disabled(!cameraUsable)
     }
 
@@ -376,12 +376,13 @@ struct CameraView: View {
         .animation(.easeOut(duration: 0.15), value: isSelected)
     }
 
-    /// Press decides on release: lift before the arm delay → tap (toggle
-    /// Manual Overlay); held past it → the armed peek was showing, so drop it.
+    /// Press decides on release: lift before the arm delay → tap (open the
+    /// picker); held past it → the armed peek was showing, so drop it.
     private var referenceThumbPressGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { _ in
-                guard peekArmTask == nil, !showReferencePeek else { return }
+                guard appState.activeReference != nil,
+                      peekArmTask == nil, !showReferencePeek else { return }
                 peekArmTask = Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(250))
                     guard !Task.isCancelled else { return }
@@ -395,7 +396,7 @@ struct CameraView: View {
                 if showReferencePeek {
                     withAnimation(.easeOut(duration: 0.15)) { showReferencePeek = false }
                 } else {
-                    vm.toggleOverlayMode()
+                    openPicker()
                 }
             }
     }
@@ -870,5 +871,60 @@ struct CameraView: View {
         if z == 0.5 { return "0.5" }
         if abs(z - z.rounded()) < 0.05 { return "\(Int(z.rounded()))" }
         return String(format: "%.1f", z)
+    }
+}
+
+// MARK: - More menu
+
+private struct CameraMoreMenu: View, Equatable {
+    let isGridVisible: Bool
+    let captureAspect: CameraViewModel.CaptureAspect
+    let isEvalHUDVisible: Bool
+    let setGrid: (Bool) -> Void
+    let setAspect: (CameraViewModel.CaptureAspect) -> Void
+    let setEval: (Bool) -> Void
+
+    static func == (a: Self, b: Self) -> Bool {
+        a.isGridVisible == b.isGridVisible
+            && a.captureAspect == b.captureAspect
+            && a.isEvalHUDVisible == b.isEvalHUDVisible
+    }
+
+    var body: some View {
+        Menu {
+            Button { setGrid(!isGridVisible) } label: {
+                Label(isGridVisible ? "Hide Grid" : "Show Grid", systemImage: "grid")
+            }
+            Section("Aspect Ratio") {
+                aspectButton("4:3 · Posts", .fourThree)
+                aspectButton("16:9 · Stories", .sixteenNine)
+            }
+            #if DEBUG
+            Section {
+                Button { setEval(!isEvalHUDVisible) } label: {
+                    Label(isEvalHUDVisible ? "Hide Coaching Eval" : "Coaching Eval",
+                          systemImage: "gauge.with.dots.needle.33percent")
+                }
+            }
+            #endif
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 18, weight: .regular))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .menuOrder(.fixed)
+        .accessibilityLabel("More camera options")
+    }
+
+    private func aspectButton(_ title: String, _ value: CameraViewModel.CaptureAspect) -> some View {
+        Button { setAspect(value) } label: {
+            if captureAspect == value {
+                Label(title, systemImage: "checkmark")
+            } else {
+                Text(title)
+            }
+        }
     }
 }

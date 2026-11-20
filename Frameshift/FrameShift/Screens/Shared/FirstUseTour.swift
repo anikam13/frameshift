@@ -22,33 +22,37 @@ enum FirstUseTour {
         var nextTitle = "Next"
         /// Draw a ring around the target (round toolbar buttons).
         var ringed = false
+        /// The spotlighted view stays tappable through the dim (tapping it
+        /// is how the step is meant to be completed).
+        var tappableTarget = false
     }
 
     static let explore: [Step] = [
         Step(target: .exploreFirstTile, area: "Explore",
-             title: "Start with a photo",
-             body: "Choose a sample you’d like to recreate."),
+             title: "Pick a photo",
+             body: "Tap one you’d like to recreate.",
+             tappableTarget: true),
         Step(target: .exploreImport, area: "Explore",
-             title: "Use your own photo",
-             body: "Tap + to import a photo. Find it later in Yours.",
+             title: "Or use your own",
+             body: "Tap + to add a photo from your library.",
              nextTitle: "Got It", ringed: true),
     ]
 
     static let camera: [Step] = [
         Step(target: .cameraOverlay, area: "Camera",
-             title: "Person-only overlay",
-             body: "Only the person is overlaid, keeping your scene visible.",
+             title: "Overlay",
+             body: "Shows the person from your photo on top of the camera.",
              ringed: true),
         Step(target: .cameraGuides, area: "Camera",
-             title: "Choose your guide",
-             body: "Tap Guides for a framing target. Tap it again for a clean view.",
+             title: "Guides",
+             body: "Shows where to put their head. Tap again to hide it.",
              ringed: true),
         Step(target: .cameraCoaching, area: "Camera",
-             title: "Keep coaching quiet",
-             body: "Tap the message to collapse it. Tap the small icon to reopen."),
+             title: "Tips",
+             body: "Tap a tip to shrink it."),
         Step(target: .cameraShutter, area: "Camera",
-             title: "Take your shot",
-             body: "Tap for one photo. Hold the shutter for a burst.",
+             title: "Take the photo",
+             body: "Tap for one photo, or hold for a burst.",
              nextTitle: "Start Shooting"),
     ]
 }
@@ -87,10 +91,18 @@ struct TourOverlay: View {
             if let index, steps.indices.contains(index) {
                 let step = steps[index]
                 let rect = anchors[step.target].map { proxy[$0] }
+                // The dim ignores the safe area, so its coordinates start above ours.
+                let hole = (rect != nil && !step.ringed)
+                    ? rect!.insetBy(dx: -4, dy: -4)
+                        .offsetBy(dx: proxy.safeAreaInsets.leading, dy: proxy.safeAreaInsets.top)
+                    : nil
                 ZStack(alignment: .topLeading) {
-                    Color.black.opacity(0.4)
+                    // Dim everything but the spotlighted view.
+                    SpotlightDim(hole: hole)
+                        .fill(Color.black.opacity(0.45), style: FillStyle(eoFill: true))
                         .ignoresSafeArea()
-                        .contentShape(Rectangle())
+                        .contentShape(SpotlightDim(hole: step.tappableTarget ? hole : nil),
+                                      eoFill: true)
                         .onTapGesture {}
 
                     if let rect, step.ringed {
@@ -137,19 +149,9 @@ struct TourOverlay: View {
 
     private func card(step: FirstUseTour.Step, number: Int, arrowX: CGFloat?, arrowOnTop: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(step.area)
-                Spacer()
-                Text("\(number) of \(steps.count)")
-                    .monospacedDigit()
-            }
-            .font(.system(.footnote))
-            .foregroundStyle(Color(hex: "#636366"))
-
             Text(step.title)
                 .font(.system(.body, weight: .semibold))
                 .foregroundStyle(Color(hex: "#1C1C1E"))
-                .padding(.top, 10)
             Text(step.body)
                 .font(.system(.subheadline))
                 .foregroundStyle(Color(hex: "#636366"))
@@ -157,10 +159,17 @@ struct TourOverlay: View {
                 .padding(.top, 6)
 
             HStack {
-                Button("Skip Tour") { finish() }
+                Button("Skip") { finish() }
                     .font(.system(.subheadline))
                     .foregroundStyle(Color(hex: "#1C1C1E"))
                 Spacer()
+                if steps.count > 1 {
+                    Text("\(number) of \(steps.count)")
+                        .font(.system(.footnote))
+                        .monospacedDigit()
+                        .foregroundStyle(Color(hex: "#8E8E93"))
+                        .padding(.trailing, 10)
+                }
                 Button {
                     advance()
                 } label: {
@@ -210,6 +219,18 @@ struct TourOverlay: View {
     private func finish() {
         index = nil
         onFinish()
+    }
+}
+
+/// Full-screen rect with an optional rounded hole (even-odd).
+private struct SpotlightDim: Shape {
+    let hole: CGRect?
+    func path(in rect: CGRect) -> Path {
+        var path = Path(rect.insetBy(dx: -200, dy: -200))
+        if let hole {
+            path.addRoundedRect(in: hole, cornerSize: CGSize(width: 12, height: 12))
+        }
+        return path
     }
 }
 

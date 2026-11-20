@@ -15,14 +15,24 @@ struct GalleryHomeView: View {
 
     @State private var source: Source = .explore
     @State private var filter: CompositionFilter = .all
+    /// Explore's Women / Men toggle; nil = everyone.
+    @State private var subject: SampleReferencePack.Subject?
     @State private var picks: [PhotosPickerItem] = []
     @State private var preview: PreviewRequest?
     @State private var removeCandidate: ReferencePhoto?
+    @State private var shareImage: SessionViewerView.ShareImage?
     @State private var showSettings = false
     @State private var showHowTo = false
     @AppStorage(FirstUseTour.exploreDoneKey) private var exploreTourDone = false
     @AppStorage(Welcome.doneKey) private var welcomeDone = false
     @State private var tourStep: Int?
+    /// Sideways page drag between Explore and Yours: how far the grid has
+    /// moved, and whether this drag turned out to be horizontal.
+    @State private var pageOffset: CGFloat = 0
+    @State private var pageDragIsHorizontal: Bool?
+    @State private var isPaging = false
+    /// A sideways drag that started on a tile must not also open it.
+    @State private var suppressTileTap = false
 
     /// The photos the preview pages through, the one it opens on, and (for
     /// a fresh import) which one shows the preparing / added toast.
@@ -43,9 +53,15 @@ struct GalleryHomeView: View {
         !appState.sessionShots.isEmpty
     }
 
-    private var gridPhotos: [ReferencePhoto] {
+    private func gridPhotos(_ source: Source) -> [ReferencePhoto] {
         switch source {
-        case .explore: return appState.curatedReferences.filter(filter.matches)
+        case .explore:
+            return appState.curatedReferences
+                .filter(filter.matches)
+                .filter { photo in
+                    guard let subject else { return true }
+                    return photo.bundledAssetName.flatMap { SampleReferencePack.subjects[$0] } == subject
+                }
         case .yours:   return appState.importedReferences
         }
     }
@@ -63,13 +79,14 @@ struct GalleryHomeView: View {
                 LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                     quickRow
                     Section {
-                        grid
+                        pagedGrid
                     } header: {
                         pinnedControls
                     }
                 }
             }
             .scrollIndicators(.hidden)
+            .scrollDisabled(pageDragIsHorizontal == true)
         }
         .background(Color(.systemBackground).ignoresSafeArea())
         .overlayPreferenceValue(TourAnchorKey.self) { anchors in
@@ -78,6 +95,10 @@ struct GalleryHomeView: View {
             }
         }
         .task(id: tourTrigger) { await startTourIfNeeded() }
+        // Tour step 1 is completed by tapping the spotlighted sample.
+        .onChange(of: preview?.id) { _, id in
+            if id != nil, tourStep == 0 { tourStep = 1 }
+        }
         .onChange(of: picks) { _, items in
             guard !items.isEmpty else { return }
             importer.importPhotos(items: items, into: appState) { id in
@@ -120,6 +141,10 @@ struct GalleryHomeView: View {
                     }
                 }
             }
+        }
+        .sheet(item: $shareImage) { item in
+            ActivityView(items: [item.image])
+                .presentationDetents([.medium, .large])
         }
         .alert(
             "Remove Reference?",
@@ -193,50 +218,83 @@ struct GalleryHomeView: View {
 
     // MARK: Quick access
 
-    /// Favorites first, then recently used. Tapping goes straight to the
+    /// Favorites first, then recently used, each under its own small label
+    /// so the two read as separate groups. Tapping goes straight to the
     /// camera (D-8): these are photos the user has already chosen.
     @ViewBuilder
     private var quickRow: some View {
         let quick = appState.quickAccessReferences
+        let favorites = quick.filter(\.isFavorite)
+        let recents = quick.filter { !$0.isFavorite }
         if !quick.isEmpty {
             ScrollView(.horizontal) {
-                HStack(spacing: 12) {
-                    ForEach(quick) { photo in
-                        // The tile's on-screen rect is where the Recreate
-                        // morph takes off from.
-                        GeometryReader { geo in
-                            Button {
-                                recreate(photo, from: geo.frame(in: .global))
-                            } label: {
-                                thumbnail(photo, width: 62, height: 76)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .frame(width: 62, height: 76)
-                        .onAppear { appState.ensureCutoutLoaded(for: photo.id) }
-                        .accessibilityLabel(photo.isFavorite ? "Favorite reference" : "Recent reference")
-                        .contextMenu { referenceActions(photo) } preview: { contextPreview(photo) }
-                    }
+                HStack(alignment: .top, spacing: 20) {
+                    if !favorites.isEmpty { quickGroup("Favorites", favorites) }
+                    if !recents.isEmpty { quickGroup("Recents", recents) }
                 }
                 .padding(.horizontal, 16)
             }
             .scrollIndicators(.hidden)
-            .padding(.top, 8)
+            .padding(.top, 4)
             .padding(.bottom, 20)
+            .transition(.opacity)
         }
+    }
+
+    private func quickGroup(_ title: String, _ photos: [ReferencePhoto]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.system(.footnote, weight: .medium))
+                .foregroundStyle(.secondary)
+                .accessibilityAddTraits(.isHeader)
+            HStack(spacing: 12) {
+                ForEach(photos) { photo in quickTile(photo) }
+            }
+        }
+    }
+
+    private func quickTile(_ photo: ReferencePhoto) -> some View {
+        // The tile's on-screen rect is where the Recreate morph takes off from.
+        GeometryReader { geo in
+            Button {
+                recreate(photo, from: geo.frame(in: .global))
+            } label: {
+                thumbnail(photo, width: 62, height: 76)
+                    .overlay(alignment: .bottomTrailing) {
+                        if photo.isFavorite {
+                            Image(systemName: "heart.fill")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(Color(hex: "#FF375F"))
+                                .padding(4)
+                                .background(Circle().fill(.white))
+                                .padding(4)
+                        }
+                    }
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(width: 62, height: 76)
+        .transition(.scale(scale: 0.8).combined(with: .opacity))
+        .onAppear { appState.ensureCutoutLoaded(for: photo.id) }
+        .accessibilityLabel(photo.isFavorite ? "Favorite reference" : "Recent reference")
+        .contextMenu { referenceActions(photo) } preview: { contextPreview(photo) }
     }
 
     // MARK: Pinned switch + chips
 
     private var pinnedControls: some View {
         VStack(spacing: 0) {
-            SourceSwitch(selection: $source)
+            SourceSwitch(selection: source, progress: pageProgress) { switchSource(to: $0) }
                 .padding(.horizontal, 16)
-            if source == .explore {
-                chips
-            } else {
-                Color.clear.frame(height: 20)
-            }
+            // Explore's chips (62pt row) fold away with the page drag
+            // instead of vanishing at the end of it, so the grid never jumps.
+            let explore = 1 - pageProgress
+            chips
+                .frame(height: 20 + 42 * explore, alignment: .top)
+                .clipped()
+                .opacity(max(0, explore * 1.6 - 0.6))
+                .allowsHitTesting(explore > 0.5)
+                .accessibilityHidden(explore < 0.5)
         }
         .padding(.top, appState.quickAccessReferences.isEmpty ? 8 : 0)
         .background(Color(.systemBackground))
@@ -251,6 +309,8 @@ struct GalleryHomeView: View {
     private var chips: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
+                SubjectToggle(selection: $subject)
+                Divider().frame(height: 20)
                 ForEach(availableFilters, id: \.self) { option in
                     let selected = option == filter
                     Button {
@@ -277,21 +337,109 @@ struct GalleryHomeView: View {
 
     // MARK: Grid
 
+    /// The current grid follows a sideways drag, with the other source's grid
+    /// riding alongside; past a third of the width (or a flick) it pages.
+    private var pagedGrid: some View {
+        let width = UIScreen.main.bounds.width
+        let other: Source = source == .explore ? .yours : .explore
+        let otherSide: CGFloat = source == .explore ? 1 : -1
+        return grid(source, isMain: true)
+            // Short grids (an empty Yours) still take the swipe below them.
+            .frame(minHeight: UIScreen.main.bounds.height * 0.6, alignment: .top)
+            .contentShape(Rectangle())
+            .offset(x: pageOffset)
+            .overlay(alignment: .top) {
+                if pageOffset != 0 {
+                    grid(other, isMain: false)
+                        .offset(x: pageOffset + otherSide * width)
+                        .allowsHitTesting(false)
+                }
+            }
+            .simultaneousGesture(pageDrag(width: width), including: tourStep == nil ? .all : .subviews)
+    }
+
+    /// 0 = Explore, 1 = Yours; drives the switch's thumb during a drag.
+    private var pageProgress: CGFloat {
+        let width = UIScreen.main.bounds.width
+        let base: CGFloat = source == .explore ? 0 : 1
+        return min(max(base - pageOffset / width, 0), 1)
+    }
+
+    private func pageDrag(width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { value in
+                guard !isPaging else { return }
+                let t = value.translation
+                if pageDragIsHorizontal == nil {
+                    pageDragIsHorizontal = abs(t.width) > abs(t.height) * 1.3
+                }
+                guard pageDragIsHorizontal == true else { return }
+                suppressTileTap = true
+                // Nothing beyond Explore (left) or Yours (right): resist.
+                let outward = (source == .explore && t.width > 0) || (source == .yours && t.width < 0)
+                pageOffset = outward ? t.width * 0.2 : t.width
+            }
+            .onEnded { value in
+                defer {
+                    pageDragIsHorizontal = nil
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(250))
+                        suppressTileTap = false
+                    }
+                }
+                guard pageDragIsHorizontal == true, !isPaging else { return }
+                let travel = value.translation.width
+                let flick = value.predictedEndTranslation.width
+                if source == .explore, travel < -width * 0.3 || flick < -width * 0.6 {
+                    switchSource(to: .yours)
+                } else if source == .yours, travel > width * 0.3 || flick > width * 0.6 {
+                    switchSource(to: .explore)
+                } else {
+                    withAnimation(.spring(duration: 0.3, bounce: 0)) { pageOffset = 0 }
+                }
+            }
+    }
+
+    /// Slides the current grid out and the other in (tap or drag), then
+    /// swaps which one is "current" with nothing visibly changing.
+    private func switchSource(to target: Source) {
+        guard target != source, !isPaging else { return }
+        let width = UIScreen.main.bounds.width
+        isPaging = true
+        if pageOffset == 0 {
+            // Tap: start from rest with the neighbour just off-screen.
+            pageOffset = target == .yours ? -0.001 : 0.001
+        }
+        withAnimation(.spring(duration: 0.32, bounce: 0)) {
+            pageOffset = target == .yours ? -width : width
+        } completion: {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                source = target
+                pageOffset = 0
+            }
+            isPaging = false
+        }
+    }
+
     @ViewBuilder
-    private var grid: some View {
-        let photos = gridPhotos
+    private func grid(_ source: Source, isMain: Bool) -> some View {
+        let photos = gridPhotos(source)
         if photos.isEmpty {
-            emptyState
+            emptyState(source)
         } else {
             LazyVGrid(columns: gridColumns, spacing: 12) {
                 ForEach(photos) { photo in
                     Button {
+                        guard !suppressTileTap, !isPaging else { return }
                         preview = PreviewRequest(ids: photos.map(\.id), startID: photo.id)
                     } label: {
                         GalleryReferenceTile(photo: photo)
                     }
                     .buttonStyle(.plain)
-                    .modifier(FirstTileAnchor(isFirst: photo.id == photos.first?.id && source == .explore))
+                    .overlay(alignment: .topTrailing) { favoriteButton(photo) }
+                    .modifier(FirstTileAnchor(isFirst: isMain && photo.id == photos.first?.id && source == .explore))
                     .contextMenu { referenceActions(photo) } preview: { contextPreview(photo) }
                 }
             }
@@ -301,7 +449,7 @@ struct GalleryHomeView: View {
     }
 
     @ViewBuilder
-    private var emptyState: some View {
+    private func emptyState(_ source: Source) -> some View {
         switch source {
         case .explore:
             ProgressView()
@@ -312,10 +460,6 @@ struct GalleryHomeView: View {
                 Text("No imported references")
                     .font(.system(.title3, weight: .bold))
                     .foregroundStyle(.primary)
-                Text("Add a photo from your library.")
-                    .font(.system(.subheadline))
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 10)
                 PhotosPicker(selection: $picks, maxSelectionCount: 10, matching: .images) {
                     Label("Add Photo", systemImage: "plus")
                         .font(.system(.callout, weight: .semibold))
@@ -332,6 +476,27 @@ struct GalleryHomeView: View {
         }
     }
 
+    /// Empty heart on every tile; tap to favorite (joins the quick row).
+    private func favoriteButton(_ photo: ReferencePhoto) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.smooth(duration: 0.3)) {
+                appState.setReferenceFavorite(id: photo.id, isFavorite: !photo.isFavorite)
+            }
+        } label: {
+            Image(systemName: photo.isFavorite ? "heart.fill" : "heart")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(photo.isFavorite ? Color(hex: "#FF375F") : .white)
+                .shadow(color: .black.opacity(0.4), radius: 3)
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(2)
+        .accessibilityLabel(photo.isFavorite ? "Remove from Favorites" : "Add to Favorites")
+    }
+
     // MARK: Context menu
 
     @ViewBuilder
@@ -342,10 +507,11 @@ struct GalleryHomeView: View {
             Label(photo.isFavorite ? "Unfavorite" : "Favorite",
                   systemImage: photo.isFavorite ? "heart.slash" : "heart")
         }
-        ShareLink(
-            item: Image(uiImage: photo.image),
-            preview: SharePreview("Reference", image: Image(uiImage: photo.image))
-        ) {
+        // A plain button: ShareLink builds its transferable up front, which
+        // made the first long-press slow to open.
+        Button {
+            shareImage = SessionViewerView.ShareImage(image: photo.image)
+        } label: {
             Label("Share", systemImage: "square.and.arrow.up")
         }
         if !photo.isCurated {
@@ -389,6 +555,7 @@ struct GalleryHomeView: View {
         guard !Task.isCancelled, !exploreTourDone else { return }
         source = .explore
         filter = .all
+        subject = nil
         tourStep = 0
     }
 
@@ -425,41 +592,77 @@ struct GalleryHomeView: View {
 /// Segmented control drawn to the Paper spec (36pt, r9, 3pt inset thumb) —
 /// the system segmented control can't take these metrics.
 private struct SourceSwitch: View {
-    @Binding var selection: GalleryHomeView.Source
-    @Namespace private var thumb
+    let selection: GalleryHomeView.Source
+    /// 0 = Explore, 1 = Yours; follows the grid during a page drag.
+    let progress: CGFloat
+    let onSelect: (GalleryHomeView.Source) -> Void
 
     private static let thumbFill = Color(UIColor { traits in
         traits.userInterfaceStyle == .dark ? .systemGray4 : .white
     })
 
     var body: some View {
-        HStack(spacing: 0) {
-            segment("Explore", .explore)
-            segment("Yours", .yours)
+        GeometryReader { geo in
+            let segment = geo.size.width / 2
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(Self.thumbFill)
+                    .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
+                    .frame(width: segment)
+                    .offset(x: progress * segment)
+                HStack(spacing: 0) {
+                    segmentButton("Explore", .explore, emphasized: progress < 0.5)
+                    segmentButton("Yours", .yours, emphasized: progress >= 0.5)
+                }
+            }
         }
         .padding(3)
         .frame(height: 36)
         .background(RoundedRectangle(cornerRadius: 9).fill(Color(.systemGray6)))
     }
 
-    private func segment(_ title: String, _ value: GalleryHomeView.Source) -> some View {
-        let selected = selection == value
-        return Button {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) { selection = value }
+    private func segmentButton(_ title: String, _ value: GalleryHomeView.Source, emphasized: Bool) -> some View {
+        Button {
+            onSelect(value)
         } label: {
             Text(title)
-                .font(.system(.subheadline, weight: selected ? .bold : .regular))
-                .foregroundStyle(selected ? Color.primary : Color.secondary)
+                .font(.system(.subheadline, weight: emphasized ? .bold : .regular))
+                .foregroundStyle(emphasized ? Color.primary : Color.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background {
-                    if selected {
-                        RoundedRectangle(cornerRadius: 7)
-                            .fill(Self.thumbFill)
-                            .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
-                            .matchedGeometryEffect(id: "thumb", in: thumb)
-                    }
-                }
                 .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selection == value ? .isSelected : [])
+    }
+}
+
+// MARK: - Women / Men toggle
+
+/// Two chips that act as one toggle: tap Women or Men to narrow Explore,
+/// tap the selected one again to show everyone.
+private struct SubjectToggle: View {
+    @Binding var selection: SampleReferencePack.Subject?
+
+    var body: some View {
+        HStack(spacing: 8) {
+            chip("Women", .women)
+            chip("Men", .men)
+        }
+    }
+
+    private func chip(_ title: String, _ value: SampleReferencePack.Subject) -> some View {
+        let selected = selection == value
+        return Button {
+            withAnimation(.easeOut(duration: 0.15)) {
+                selection = selected ? nil : value
+            }
+        } label: {
+            Text(title)
+                .font(.system(.footnote, weight: .medium))
+                .foregroundStyle(selected ? Color(.systemBackground) : Color.primary)
+                .padding(.horizontal, 14)
+                .frame(height: 34)
+                .background(Capsule().fill(selected ? Color.primary : Color(.systemGray6)))
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -468,8 +671,8 @@ private struct SourceSwitch: View {
 
 // MARK: - Grid tile
 
-/// 173×228 r8 photo tile. Favorited curated photos carry a bookmark (D-9);
-/// imports show analysis state.
+/// 173×228 r8 photo tile; imports show analysis state. The favorite heart
+/// is a separate button laid over it by the grid.
 struct GalleryReferenceTile: View {
     let photo: ReferencePhoto
 
@@ -485,16 +688,6 @@ struct GalleryReferenceTile: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .contentShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(alignment: .topTrailing) {
-                if photo.isCurated && photo.isFavorite {
-                    Image(systemName: "bookmark.fill")
-                        .font(.system(.subheadline))
-                        .foregroundStyle(.white)
-                        .shadow(color: .black.opacity(0.35), radius: 2)
-                        .padding(10)
-                        .accessibilityLabel("Favorite")
-                }
-            }
             .overlay {
                 if isAnalyzing && !photo.isCurated {
                     ProgressView()

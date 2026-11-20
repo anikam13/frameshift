@@ -127,21 +127,24 @@ FrameShift/                                 // workspace root
 - Launch: always the gallery home; the camera session starts underneath so it's
   warm on Recreate / Resume Camera (D-2). An empty library seeds the bundled samples (Explore).
 - Gallery home: header (Resume Camera, `+` import, `⋯` → Settings / How to Use),
-  quick row, Explore/Yours switch + chips, 2-column grid. Tap → full-bleed
+  "Recents" quick row, Explore/Yours switch + chips (Women / Men toggle, then
+  composition), 2-column grid with a heart (favorite) on every tile. Tap → full-bleed
   `ReferencePreviewView` → **Recreate** (→ camera). Import opens the preview
   with a "Preparing reference…" → "Added to Yours" pill.
 - Light/dark: the app follows the system; `CameraView` forces dark only while
   the camera is showing. Modals from the camera use `.preferredColorScheme(.system)`.
 - Camera top row: back chevron (→ references), reference thumbnail + chevron
-  (picker sheet), **Overlay** and **Guides** mode buttons, one-tap flash
-  (off/on), `⋯` menu (Grid toggle, 4:3 Posts / 16:9 Stories aspect).
+  (one control: tap → picker sheet, hold → peek), **Overlay** and **Guides**
+  mode buttons, one-tap flash (off/on), `⋯` menu (Grid, inline 4:3 Posts /
+  16:9 Stories aspect; an Equatable subview so camera updates don't break it).
 - `ReferencePickerSheet`: compact detent (favorites & recent) → large
   (Explore / Yours + composition chips). Choosing a reference calls
   `AppState.useReference` and never resets the capture session.
 - Session thumbnail (bottom-left) → `SessionGalleryView`: this session's shots
   only (already in Photos), bursts collapse to one tile → `BurstReviewView`
   (Set as Cover); singles → `SessionViewerView` (hold or Compare toggles the
-  reference). Select → Add to References / Share.
+  reference; bottom bar Share · Compare · Delete, `⋯` Save as Reference).
+  Select (tap or sideways drag across tiles) → Add to References / Share / Delete.
 - First use: `WelcomeView` (one screen, press the shutter to start, D-34), then no
   onboarding carousel — `FirstUseTour` spotlight cards — Explore
   (2 steps) on the gallery, Camera (4 steps) once camera access is granted.

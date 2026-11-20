@@ -3,6 +3,7 @@ import SwiftUI
 /// Comparison-first viewer (D-26). Swipe through the session; hold the photo
 /// to see the reference it was shot against, release to return. The Compare
 /// button toggles the same thing for people who can't press and hold (O-8).
+/// Bottom bar: Share · Compare · Delete. ⋯ holds Save as Reference.
 /// No filters, editor, or Save button — photos are already in Apple Photos.
 struct SessionViewerView: View {
     let startItemID: UUID
@@ -14,6 +15,13 @@ struct SessionViewerView: View {
     @State private var isHolding = false
     @State private var isComparing = false
     @State private var toast: String?
+    @State private var shareImage: ShareImage?
+    @State private var isPreparingShare = false
+
+    struct ShareImage: Identifiable {
+        let id = UUID()
+        let image: UIImage
+    }
 
     private var items: [GalleryItem] { GalleryItem.group(appState.sessionShots) }
 
@@ -91,18 +99,6 @@ struct SessionViewerView: View {
                         } label: {
                             Label("Save as Reference", systemImage: "plus.square.on.square")
                         }
-                        ShareLink(
-                            item: ShareableShot(shot: item.cover, appState: appState),
-                            preview: SharePreview("FrameShift Photo", image: Image(uiImage: item.cover.image))
-                        ) {
-                            Label("Share", systemImage: "square.and.arrow.up")
-                        }
-                        Divider()
-                        Button(role: .destructive) {
-                            delete(item)
-                        } label: {
-                            Label(item.isBurst ? "Delete Burst" : "Delete", systemImage: "trash")
-                        }
                     } label: {
                         Image(systemName: "ellipsis")
                             .font(.system(.body, weight: .medium))
@@ -158,8 +154,17 @@ struct SessionViewerView: View {
 
     // MARK: Bottom bar
 
+    /// Share · Compare · Delete as plain buttons (like Photos). These used
+    /// to live in the ⋯ menu, where Share and Delete didn't fire reliably.
     private var bottomBar: some View {
-        Group {
+        HStack(spacing: 0) {
+            barButton(systemName: "square.and.arrow.up", label: "Share") {
+                if let item = currentItem { share(item.cover) }
+            }
+            .disabled(currentItem == nil || isPreparingShare)
+
+            Spacer(minLength: 12)
+
             if currentReference != nil {
                 Button {
                     isComparing.toggle()
@@ -175,9 +180,44 @@ struct SessionViewerView: View {
             } else {
                 Color.clear.frame(height: 48)
             }
+
+            Spacer(minLength: 12)
+
+            barButton(systemName: "trash", label: currentItem?.isBurst == true ? "Delete Burst" : "Delete") {
+                if let item = currentItem { delete(item) }
+            }
+            .disabled(currentItem == nil)
         }
+        .padding(.horizontal, 20)
         .padding(.top, 16)
         .padding(.bottom, 20)
+        .sheet(item: $shareImage) { item in
+            ActivityView(items: [item.image])
+                .presentationDetents([.medium, .large])
+                .ignoresSafeArea()
+        }
+    }
+
+    private func barButton(systemName: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 20, weight: .regular))
+                .foregroundStyle(.white)
+                .frame(width: 48, height: 48)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+
+    /// Full-resolution JPEG from the session cache (display image if gone).
+    private func share(_ shot: CapturedPhoto) {
+        isPreparingShare = true
+        Task {
+            let full = await appState.loadFullShot(id: shot.id)
+            isPreparingShare = false
+            shareImage = ShareImage(image: full ?? shot.image)
+        }
     }
 
     /// Deletes from Photos (iOS confirms), then moves to a neighbor — or
@@ -218,4 +258,13 @@ struct SessionViewerView: View {
             toast = nil
         }
     }
+}
+
+/// System share sheet.
+struct ActivityView: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }

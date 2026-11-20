@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// First-launch welcome (D-34). Shown once, over the gallery, while the
 /// camera starts underneath. Settings → Replay Tutorial shows it again.
@@ -7,13 +8,17 @@ import SwiftUI
 /// tilted columns drifting slowly in alternating directions (the scrolling
 /// collage photo apps use on their welcome screens), under a faint
 /// rule-of-thirds grid so it reads as a viewfinder. It falls off to black
-/// behind the title and shutter. Frame-driven by `TimelineView(.animation)`
-/// with small pre-scaled thumbnails, so it stays cheap.
+/// behind the title and shutter.
 ///
-/// Get started is the real shutter: press → haptic, the wall falls away, and
-/// the shutter's disc grows to fill the screen in the gallery's background
-/// colour, then dissolves into the gallery. Reduce Motion: the wall holds
-/// still and the hand-off is a cross-fade.
+/// Get started is the real shutter: press → haptic, and the shutter's disc
+/// grows to fill the screen in the gallery's background colour, then
+/// dissolves into the gallery. Reduce Motion: the wall holds still and the
+/// hand-off is a cross-fade.
+///
+/// The wall drift and the disc are Core Animation, run by the render
+/// server: first launch keeps the main thread busy (sample import, camera
+/// start, the gallery underneath), and frame-driven SwiftUI versions of
+/// both stuttered whenever it was.
 enum Welcome {
     static let doneKey = "frameshift.welcome.done"
 }
@@ -22,61 +27,65 @@ struct WelcomeView: View {
     let onFinished: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var appeared = Date()
     @State private var showTitle = false
-    @State private var showWall = false
+    /// Decoded off the main thread so the first frames never wait on them.
+    @State private var thumbnails: [UIImage] = []
     @State private var isPressed = false
     @State private var leaving = false
-    @State private var discScale: CGFloat = 0
+    /// The disc fills the screen: everything under it is dropped and the
+    /// disc fades into the gallery.
+    @State private var covered = false
     @State private var finished = false
-    @State private var coverTarget: CGFloat = 30
+    /// Warmed on appear: a cold generator stalls the frame it first fires in.
+    @State private var haptic = UIImpactFeedbackGenerator(style: .medium)
 
     var body: some View {
         GeometryReader { geo in
             let size = geo.size
             let shutterCenter = CGPoint(x: size.width / 2, y: size.height - geo.safeAreaInsets.bottom - 76)
             ZStack {
-                Color.black
+                if !covered {
+                    Color.black
 
-                ReferenceWall(paused: reduceMotion || leaving, start: appeared)
-                    .opacity(leaving ? 0 : (showWall ? 1 : 0))
-                    .scaleEffect(leaving ? 1.06 : 1)
-                    .animation(.easeOut(duration: leaving ? 0.3 : 1.0), value: showWall)
-                    .animation(.easeOut(duration: 0.3), value: leaving)
+                    ReferenceWallView(images: thumbnails, animated: !reduceMotion)
 
-                // Fall-off to black for the title and shutter.
-                LinearGradient(
-                    stops: [
-                        .init(color: .black.opacity(0.35), location: 0),
-                        .init(color: .black.opacity(0.15), location: 0.25),
-                        .init(color: .black.opacity(0.85), location: 0.55),
-                        .init(color: .black, location: 0.68),
-                    ],
-                    startPoint: .top, endPoint: .bottom
-                )
+                    // Fall-off to black for the title and shutter.
+                    LinearGradient(
+                        stops: [
+                            .init(color: .black.opacity(0.35), location: 0),
+                            .init(color: .black.opacity(0.15), location: 0.25),
+                            .init(color: .black.opacity(0.85), location: 0.55),
+                            .init(color: .black, location: 0.68),
+                        ],
+                        startPoint: .top, endPoint: .bottom
+                    )
 
-                title
-                    .position(x: size.width / 2, y: size.height * 0.68)
+                    title
+                        .position(x: size.width / 2, y: size.height * 0.68)
 
-                shutter
-                    .position(shutterCenter)
+                    shutter
+                        .position(shutterCenter)
+                }
 
                 // The shutter's disc becomes the gallery's background.
-                Circle()
-                    .fill(Color(.systemBackground))
-                    .frame(width: 66, height: 66)
-                    .scaleEffect(discScale)
-                    .position(shutterCenter)
-                    .allowsHitTesting(false)
+                CoverDiscView(center: shutterCenter, startRadius: 33 * 0.88, play: leaving && !reduceMotion) {
+                    // Fully covered: drop the rest (invisible under the
+                    // disc) while the disc fades into the gallery.
+                    covered = true
+                } onFaded: {
+                    finish()
+                }
+                .allowsHitTesting(false)
             }
             .ignoresSafeArea()
+            .allowsHitTesting(!covered)
             .onAppear {
-                appeared = Date()
-                showWall = true
-                withAnimation(.easeOut(duration: 0.6).delay(0.35)) { showTitle = true }
+                haptic.prepare()
+                withAnimation(.easeOut(duration: 0.6).delay(0.15)) { showTitle = true }
             }
-            .onAppear { coverTarget = coverScale(for: size, from: shutterCenter) }
-            .onChange(of: size) { _, _ in coverTarget = coverScale(for: size, from: shutterCenter) }
+            .task {
+                thumbnails = await ReferenceWallView.loadThumbnails()
+            }
         }
         .statusBarHidden(true)
     }
@@ -84,22 +93,19 @@ struct WelcomeView: View {
     // MARK: Title
 
     private var title: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 0) {
             Text("Welcome to")
                 .font(.system(.title3, weight: .medium))
                 .foregroundStyle(.white.opacity(0.6))
             Text("FrameShift")
                 .font(.system(.largeTitle, weight: .bold))
                 .foregroundStyle(.white)
-            Text("Press the shutter to get started")
-                .font(.system(.subheadline))
-                .foregroundStyle(.white.opacity(0.55))
-                .padding(.top, 6)
         }
         .multilineTextAlignment(.center)
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .opacity(showTitle && !leaving ? 1 : 0)
         .offset(y: showTitle ? 0 : 12)
+        .animation(.easeOut(duration: 0.12), value: leaving)
         .accessibilityElement(children: .combine)
     }
 
@@ -126,15 +132,14 @@ struct WelcomeView: View {
         .contentShape(Circle())
         .gesture(
             DragGesture(minimumDistance: 0)
+                // Fires on touch-down, like the camera's shutter.
                 .onChanged { _ in
                     guard !isPressed, !leaving else { return }
                     isPressed = true
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                }
-                .onEnded { _ in
-                    isPressed = false
+                    haptic.impactOccurred()
                     getStarted()
                 }
+                .onEnded { _ in isPressed = false }
         )
         .accessibilityElement()
         .accessibilityAddTraits(.isButton)
@@ -142,28 +147,20 @@ struct WelcomeView: View {
         .accessibilityAction { getStarted() }
     }
 
-    private func coverScale(for size: CGSize, from center: CGPoint) -> CGFloat {
-        let corners = [CGPoint.zero, CGPoint(x: size.width, y: 0),
-                       CGPoint(x: 0, y: size.height), CGPoint(x: size.width, y: size.height)]
-        let far = corners.map { hypot($0.x - center.x, $0.y - center.y) }.max() ?? 1000
-        return (far + 20) / 33
-    }
-
     private func getStarted() {
         guard !leaving else { return }
         leaving = true
         if reduceMotion {
-            finish()
-            return
-        }
-        discScale = 0.88   // where the pressed inner fill was
-        withAnimation(.spring(duration: 0.55, bounce: 0)) { discScale = coverTarget }
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(0.5))
-            finish()
+            withAnimation(.easeOut(duration: 0.25)) { covered = true }
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(0.25))
+                finish()
+            }
         }
     }
 
+    /// The parent removes this view only once it's invisible, so the
+    /// gallery's update for "welcome done" never lands mid-animation.
     private func finish() {
         guard !finished else { return }
         finished = true
@@ -186,83 +183,232 @@ private struct PulseRing: View {
     }
 }
 
-/// Three tilted columns of the sample references, scrolling in alternating
-/// directions, with a faint thirds grid on top.
-private struct ReferenceWall: View {
-    let paused: Bool
-    let start: Date
+// MARK: - Cover disc
 
-    private static let thumbnails: [UIImage] = SampleReferencePack.assetNames.compactMap {
-        UIImage(named: $0)?.preparingThumbnail(of: CGSize(width: 260, height: 364))
+/// The shutter's fill growing to cover the screen, then fading out. Both
+/// steps are Core Animation so they stay smooth however busy the app is.
+private struct CoverDiscView: UIViewRepresentable {
+    let center: CGPoint
+    let startRadius: CGFloat
+    let play: Bool
+    let onCovered: () -> Void
+    let onFaded: () -> Void
+
+    func makeUIView(context: Context) -> DiscView { DiscView() }
+
+    func updateUIView(_ view: DiscView, context: Context) {
+        guard play else { return }
+        view.play(center: center, startRadius: startRadius, onCovered: onCovered, onFaded: onFaded)
     }
 
-    var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width, h = geo.size.height
-            let spacing: CGFloat = 10
-            let colW = (w * 1.3 - spacing * 2) / 3
-            let tileH = colW * 1.4
-            let images = Self.thumbnails
-            TimelineView(.animation(paused: paused)) { context in
-                let t = paused ? 0 : context.date.timeIntervalSince(start)
-                HStack(alignment: .top, spacing: spacing) {
-                    ForEach(0..<3, id: \.self) { col in
-                        column(images: rotated(images, by: col * 3), tileW: colW, tileH: tileH,
-                               spacing: spacing, offset: scroll(t: t, col: col, tileH: tileH, spacing: spacing, count: images.count))
-                    }
-                }
-                .frame(width: w * 1.3, height: h * 1.3, alignment: .top)
-                .clipped()
-                .rotationEffect(.degrees(-8))
-                .position(x: w / 2, y: h / 2)
-            }
-            ThirdsGrid()
-                .stroke(Color.white.opacity(0.14), lineWidth: 0.5)
+    final class DiscView: UIView {
+        private let disc = CAShapeLayer()
+        private var played = false
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isUserInteractionEnabled = false
+            backgroundColor = .clear
+            disc.isHidden = true
+            layer.addSublayer(disc)
         }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
 
-    private func rotated(_ a: [UIImage], by n: Int) -> [UIImage] {
-        guard !a.isEmpty else { return a }
-        let k = n % a.count
-        return Array(a[k...] + a[..<k])
-    }
+        required init?(coder: NSCoder) { fatalError() }
 
-    /// Alternating directions, slightly different speeds (pt/s).
-    private func scroll(t: Double, col: Int, tileH: CGFloat, spacing: CGFloat, count: Int) -> CGFloat {
-        let loop = CGFloat(max(count, 1)) * (tileH + spacing)
-        let speed: CGFloat = [14, 11, 16][col]
-        let base = CGFloat(col) * tileH * 0.45
-        let raw = (base + speed * CGFloat(t)).truncatingRemainder(dividingBy: loop)
-        return col == 1 ? raw - loop : -raw
-    }
+        func play(center: CGPoint, startRadius: CGFloat,
+                  onCovered: @escaping () -> Void, onFaded: @escaping () -> Void) {
+            guard !played, bounds.width > 0 else { return }
+            played = true
 
-    private func column(images: [UIImage], tileW: CGFloat, tileH: CGFloat,
-                        spacing: CGFloat, offset: CGFloat) -> some View {
-        // Two copies stacked so the loop is seamless.
-        VStack(spacing: spacing) {
-            ForEach(0..<(images.count * 2), id: \.self) { i in
-                Image(uiImage: images[i % images.count])
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: tileW, height: tileH)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            // Radius that reaches the farthest corner.
+            let corners = [CGPoint.zero, CGPoint(x: bounds.width, y: 0),
+                           CGPoint(x: 0, y: bounds.height), CGPoint(x: bounds.width, y: bounds.height)]
+            let radius = (corners.map { hypot($0.x - center.x, $0.y - center.y) }.max() ?? 1000) + 4
+
+            // Full-size circle scaled down, so it's crisp when it lands.
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            disc.frame = CGRect(x: center.x - radius, y: center.y - radius,
+                                width: radius * 2, height: radius * 2)
+            disc.path = UIBezierPath(ovalIn: disc.bounds).cgPath
+            disc.fillColor = UIColor.systemBackground.resolvedColor(with: traitCollection).cgColor
+            disc.isHidden = false
+            CATransaction.commit()
+
+            let grow = CABasicAnimation(keyPath: "transform.scale")
+            grow.fromValue = startRadius / radius
+            grow.toValue = 1
+            grow.duration = 0.42
+            // Quick start, soft landing: responsive under the finger.
+            grow.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.8, 0.25, 1)
+
+            CATransaction.begin()
+            CATransaction.setCompletionBlock { [weak self] in
+                onCovered()
+                self?.fadeOut(onFaded)
             }
+            disc.add(grow, forKey: "grow")
+            CATransaction.commit()
         }
-        .offset(y: offset)
-        .frame(width: tileW, alignment: .top)
+
+        private func fadeOut(_ done: @escaping () -> Void) {
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = 1
+            fade.toValue = 0
+            fade.duration = 0.24
+            // Let SwiftUI drop what's under the disc before it thins out.
+            fade.beginTime = CACurrentMediaTime() + 0.03
+            fade.fillMode = .backwards
+            fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            CATransaction.setCompletionBlock(done)
+            disc.opacity = 0
+            disc.add(fade, forKey: "fade")
+            CATransaction.commit()
+        }
     }
 }
 
-private struct ThirdsGrid: Shape {
-    func path(in r: CGRect) -> Path {
-        var p = Path()
-        for i in 1...2 {
-            let x = r.width * CGFloat(i) / 3, y = r.height * CGFloat(i) / 3
-            p.move(to: CGPoint(x: x, y: 0)); p.addLine(to: CGPoint(x: x, y: r.height))
-            p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: r.width, y: y))
+// MARK: - Reference wall
+
+/// Three tilted columns of the sample references, scrolling in alternating
+/// directions, with a faint thirds grid on top.
+private struct ReferenceWallView: UIViewRepresentable {
+    let images: [UIImage]
+    let animated: Bool
+
+    static func loadThumbnails() async -> [UIImage] {
+        await Task.detached(priority: .userInitiated) {
+            SampleReferencePack.assetNames.compactMap { name -> UIImage? in
+                // Force the decode here, not on the main thread at first draw.
+                UIImage(named: name)?
+                    .preparingThumbnail(of: CGSize(width: 260, height: 364))?
+                    .preparingForDisplay()
+            }
+        }.value
+    }
+
+    func makeUIView(context: Context) -> WallView { WallView() }
+
+    func updateUIView(_ view: WallView, context: Context) {
+        view.configure(images: images, animated: animated)
+    }
+
+    final class WallView: UIView {
+        private let wall = CALayer()
+        private let grid = CAShapeLayer()
+        private var images: [UIImage] = []
+        private var animated = true
+        private var builtSize: CGSize = .zero
+        private var hasFadedIn = false
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isUserInteractionEnabled = false
+            clipsToBounds = true
+            wall.masksToBounds = true
+            layer.addSublayer(wall)
+            grid.strokeColor = UIColor.white.withAlphaComponent(0.14).cgColor
+            grid.fillColor = nil
+            grid.lineWidth = 0.5
+            layer.addSublayer(grid)
+            alpha = 0
         }
-        return p
+
+        required init?(coder: NSCoder) { fatalError() }
+
+        func configure(images: [UIImage], animated: Bool) {
+            guard !images.isEmpty, images.count != self.images.count || animated != self.animated else { return }
+            self.images = images
+            self.animated = animated
+            builtSize = .zero
+            setNeedsLayout()
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            guard !images.isEmpty, bounds.size != builtSize, bounds.width > 0 else { return }
+            builtSize = bounds.size
+            build()
+            if !hasFadedIn {
+                hasFadedIn = true
+                transform = CGAffineTransform(scaleX: 1.03, y: 1.03)
+                UIView.animate(withDuration: 1.2, delay: 0, options: [.curveEaseOut, .allowUserInteraction]) {
+                    self.alpha = 1
+                    self.transform = .identity
+                }
+            }
+        }
+
+        private func build() {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            defer { CATransaction.commit() }
+
+            wall.sublayers?.forEach { $0.removeFromSuperlayer() }
+            let w = bounds.width, h = bounds.height
+            let spacing: CGFloat = 10
+            let wallSize = CGSize(width: w * 1.3, height: h * 1.3)
+            let colW = (wallSize.width - spacing * 2) / 3
+            let tileH = colW * 1.4
+            let loop = CGFloat(images.count) * (tileH + spacing)
+
+            wall.bounds = CGRect(origin: .zero, size: wallSize)
+            wall.position = CGPoint(x: w / 2, y: h / 2)
+            wall.setAffineTransform(CGAffineTransform(rotationAngle: -8 * .pi / 180))
+
+            let speeds: [CGFloat] = [14, 11, 16]   // pt/s
+            for col in 0..<3 {
+                let column = CALayer()
+                column.frame = CGRect(x: CGFloat(col) * (colW + spacing), y: 0,
+                                      width: colW, height: loop * 2)
+                let ordered = rotated(images, by: col * 3)
+                // Two copies stacked so the loop is seamless.
+                for i in 0..<(ordered.count * 2) {
+                    let tile = CALayer()
+                    tile.frame = CGRect(x: 0, y: CGFloat(i) * (tileH + spacing), width: colW, height: tileH)
+                    tile.contents = ordered[i % ordered.count].cgImage
+                    tile.contentsGravity = .resizeAspectFill
+                    tile.masksToBounds = true
+                    tile.cornerRadius = 14
+                    tile.cornerCurve = .continuous
+                    column.addSublayer(tile)
+                }
+                wall.addSublayer(column)
+
+                // Columns 0 and 2 drift up, column 1 down; staggered starts.
+                let up = col != 1
+                let start = CGFloat(col) * tileH * 0.45
+                // Keep the column covering the wall for the whole loop.
+                let from = up ? -start : -loop - start
+                let to = up ? from - loop : from + loop
+                column.setAffineTransform(CGAffineTransform(translationX: 0, y: from))
+                guard animated else { continue }
+                let drift = CABasicAnimation(keyPath: "transform.translation.y")
+                drift.fromValue = from
+                drift.toValue = to
+                drift.duration = CFTimeInterval(loop / speeds[col])
+                drift.repeatCount = .infinity
+                drift.timingFunction = CAMediaTimingFunction(name: .linear)
+                drift.isRemovedOnCompletion = false
+                column.add(drift, forKey: "drift")
+            }
+
+            let path = UIBezierPath()
+            for i in 1...2 {
+                let x = w * CGFloat(i) / 3, y = h * CGFloat(i) / 3
+                path.move(to: CGPoint(x: x, y: 0)); path.addLine(to: CGPoint(x: x, y: h))
+                path.move(to: CGPoint(x: 0, y: y)); path.addLine(to: CGPoint(x: w, y: y))
+            }
+            grid.frame = bounds
+            grid.path = path.cgPath
+        }
+
+        private func rotated(_ a: [UIImage], by n: Int) -> [UIImage] {
+            guard !a.isEmpty else { return a }
+            let k = n % a.count
+            return Array(a[k...] + a[..<k])
+        }
     }
 }

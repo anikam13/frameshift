@@ -10,6 +10,21 @@ struct ViewfinderView: UIViewRepresentable {
         view.previewLayer.session = camera.session
         view.previewLayer.videoGravity = .resizeAspectFill
         camera.previewLayer = view.previewLayer
+        #if DEBUG && targetEnvironment(simulator)
+        if let feed = SimulatedCameraFeed.shared {
+            let still = CALayer()
+            still.contents = feed.frame.cgImage
+            still.contentsGravity = .resizeAspectFill
+            still.masksToBounds = true
+            view.layer.addSublayer(still)
+            view.simulatedFeedLayer = still
+            view.feedObserver = NotificationCenter.default.addObserver(
+                forName: SimulatedCameraFeed.frameChanged, object: nil, queue: .main
+            ) { [weak still] _ in
+                still?.contents = SimulatedCameraFeed.shared?.frame.cgImage
+            }
+        }
+        #endif
         return view
     }
 
@@ -21,5 +36,17 @@ final class _PreviewView: UIView {
 
     var previewLayer: AVCaptureVideoPreviewLayer {
         layer as! AVCaptureVideoPreviewLayer
+    }
+
+    /// Simulator-only still feed (see SimulatedCameraFeed).
+    var simulatedFeedLayer: CALayer?
+    var feedObserver: NSObjectProtocol?
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        simulatedFeedLayer?.frame = bounds
+        CATransaction.commit()
     }
 }

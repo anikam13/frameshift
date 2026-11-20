@@ -65,6 +65,14 @@ class CameraService: NSObject, ObservableObject {
     /// `requestIfNeeded: false` never shows the system prompt — the camera
     /// asks at the point of need, after FrameShift's own explanation (D-28).
     func configure(requestIfNeeded: Bool = false) {
+        #if DEBUG && targetEnvironment(simulator)
+        if let feed = SimulatedCameraFeed.shared {
+            authorizationState = .authorized
+            feed.start(on: videoQueue) { [weak self] buffer in self?.onVideoFrame?(buffer) }
+            isRunning = true
+            return
+        }
+        #endif
         observeInterruptions()
         let status = AVCaptureDevice.authorizationStatus(for: .video)
         switch status {
@@ -171,6 +179,13 @@ class CameraService: NSObject, ObservableObject {
     }
 
     func stop() {
+        #if DEBUG && targetEnvironment(simulator)
+        if let feed = SimulatedCameraFeed.shared {
+            feed.stop()
+            isRunning = false
+            return
+        }
+        #endif
         guard session.isRunning else { return }
         sessionQueue.async {
             self.session.stopRunning()
@@ -310,6 +325,16 @@ class CameraService: NSObject, ObservableObject {
     ) {
         // Visible preview region in normalized capture coordinates.
         // Layer bounds must be read on the main thread, so resolve before hopping queues.
+        #if DEBUG && targetEnvironment(simulator)
+        if let feed = SimulatedCameraFeed.shared {
+            let bounds = previewLayer?.bounds.size ?? .zero
+            photoProcessingQueue.async {
+                let shot = feed.capture(visibleIn: bounds)
+                DispatchQueue.main.async { completion(shot) }
+            }
+            return
+        }
+        #endif
         let cropRect = previewLayer.map {
             $0.metadataOutputRectConverted(fromLayerRect: $0.bounds)
         }

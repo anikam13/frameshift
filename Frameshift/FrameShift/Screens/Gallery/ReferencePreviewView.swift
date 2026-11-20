@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 
 /// Immersive reference preview (Paper "Reference Preview" and import
 /// "Preparing / Added to Yours"). Full-bleed photo, swipe sideways through
@@ -172,6 +173,19 @@ struct ReferencePreviewView: View {
               let photo = photos.first(where: { $0.id == currentID }) ?? photos.first
         else { return }
         appState.useReference(id: photo.id)
+
+        // First Recreate, before camera access: go straight to the access
+        // screen. Fading the gallery out on the way flashed it for a beat.
+        guard AVCaptureDevice.authorizationStatus(for: .video) == .authorized else {
+            isLeaving = true
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                appState.selectedTab = .camera
+                dismiss()
+            }
+            return
+        }
 
         guard !appState.viewfinderFrame.isEmpty else {
             appState.selectedTab = .camera

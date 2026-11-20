@@ -12,7 +12,7 @@ struct RootTabView: View {
             CameraView()
             if !welcomeDone {
                 WelcomeView {
-                    withAnimation(.easeOut(duration: 0.25)) { welcomeDone = true }
+                    welcomeDone = true   // already faded out
                 }
                 .transition(.opacity)
                 .zIndex(1)

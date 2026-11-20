@@ -25,7 +25,12 @@ nonisolated final class LiveVisionAnalyzer: @unchecked Sendable {
     }
 
     /// Below this a human rectangle is treated as no one there.
+    #if targetEnvironment(simulator)
+    /// The Simulator's CPU-only detector scores people much lower.
+    static let minimumHumanConfidence: Float = 0.1
+    #else
     static let minimumHumanConfidence: Float = 0.6
+    #endif
 
     private var lastProcessed = Date.distantPast
     /// ~3 fps: fast enough that framing feedback tracks a moving subject;
@@ -67,7 +72,12 @@ nonisolated final class LiveVisionAnalyzer: @unchecked Sendable {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self else { return }
             do {
+                #if targetEnvironment(simulator)
+                VNRequest.simulatorCPU([rectsRequest])
+                try handler.perform([rectsRequest])  // no pose model in the Simulator
+                #else
                 try handler.perform([rectsRequest, poseRequest])
+                #endif
             } catch {
                 self.publish(subject: Subject(), lighting: 0.4, contentSize: orientedSize)
                 return
