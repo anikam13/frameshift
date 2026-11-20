@@ -4,8 +4,6 @@ import SwiftUI
 /// both an App Store Connect URL and an easily accessible in-app copy).
 /// Keep this text in sync with PRIVACY.md at the workspace root.
 struct PrivacyPolicyView: View {
-    @Environment(\.dismiss) private var dismiss
-
     private struct Section: Identifiable {
         let title: String
         let body: String
@@ -25,7 +23,7 @@ struct PrivacyPolicyView: View {
         ),
         Section(
             title: "Photo Library Access",
-            body: "Importing reference photos is handled through Apple's system photo picker, which runs outside of FrameShift's process — FrameShift only ever receives the specific photos you choose to import, never broad library access. Saving your photos uses \"add-only\" access: FrameShift can save captured shots and export cards to your camera roll, but cannot read, browse, or modify the rest of your photo library."
+            body: "Importing reference photos is handled through Apple's system photo picker, which runs outside of FrameShift's process — FrameShift only ever receives the specific photos you choose to import, never broad library access. Saving your photos uses \"add-only\" access: FrameShift saves the photos you take to your camera roll, but cannot read, browse, or modify the rest of your photo library. If you choose Delete on a photo you took in FrameShift, iOS asks you to allow photo access and confirm; FrameShift uses it only to delete the photos it saved for you (they go to Recently Deleted) and never reads the rest of your library."
         ),
         Section(
             title: "On-Device Processing",
@@ -33,11 +31,11 @@ struct PrivacyPolicyView: View {
         ),
         Section(
             title: "Data Storage",
-            body: "Reference photos, captured shots, and your app settings are stored locally in FrameShift's private storage on your device. Nothing is synced to iCloud or any external server by FrameShift itself."
+            body: "Reference photos and your app settings are stored locally in FrameShift's private storage on your device. Photos you take are saved to your camera roll; FrameShift keeps only a temporary copy while your shooting session is open, deleted when the session ends (30 minutes after your last photo). Nothing is synced to iCloud or any external server by FrameShift itself."
         ),
         Section(
             title: "Data Deletion",
-            body: "You can delete individual reference photos or captured shots at any time from within the app, or use \"Clear All References\" / \"Clear All Captured Shots\" in Settings to remove everything at once. Deleting the app removes all of its data from your device."
+            body: "You can remove imported reference photos at any time from within the app, or use \"Clear Imported References\" in Settings → Storage. Deleting the app removes all of its data from your device."
         ),
         Section(
             title: "Third-Party Sharing",
@@ -54,8 +52,7 @@ struct PrivacyPolicyView: View {
     ]
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
+        ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     Text("Last updated: \(lastUpdated)")
                         .font(.subheadline)
@@ -75,15 +72,8 @@ struct PrivacyPolicyView: View {
                     }
                 }
                 .padding()
-            }
-            .navigationTitle("Privacy Policy")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
         }
-        .preferredColorScheme(.dark)
+        .navigationTitle("Privacy Policy")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

@@ -15,6 +15,11 @@ struct ReferencePhoto: Identifiable {
     /// onboarding / "Add samples" can skip photos already in the library.
     var bundledAssetName: String?
     let importedAt: Date
+    /// User-starred; leads the quick-access row and camera picker.
+    var isFavorite: Bool = false
+    /// Times this reference was made active in the camera. Ranks "recent".
+    var useCount: Int = 0
+    var lastUsedAt: Date?
 
     init(image: UIImage, bundledAssetName: String? = nil) {
         self.id = UUID()
@@ -33,7 +38,10 @@ struct ReferencePhoto: Identifiable {
         spec: ShotSpec? = nil,
         personCutout: UIImage? = nil,
         analysisFailed: Bool = false,
-        bundledAssetName: String? = nil
+        bundledAssetName: String? = nil,
+        isFavorite: Bool = false,
+        useCount: Int = 0,
+        lastUsedAt: Date? = nil
     ) {
         self.id = id
         self.image = image
@@ -42,5 +50,11 @@ struct ReferencePhoto: Identifiable {
         self.analysisFailed = analysisFailed
         self.bundledAssetName = bundledAssetName
         self.importedAt = importedAt
+        self.isFavorite = isFavorite
+        self.useCount = useCount
+        self.lastUsedAt = lastUsedAt
     }
+
+    /// Curated (bundled) photos belong to Explore; everything else to Yours.
+    var isCurated: Bool { bundledAssetName != nil }
 }

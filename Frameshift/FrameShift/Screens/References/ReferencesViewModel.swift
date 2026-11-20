@@ -7,15 +7,27 @@ class ReferencesViewModel: ObservableObject {
 
     /// Imports picked photos and kicks off Vision analysis for each.
     /// The photo appears immediately; its style/spec populates silently.
-    func importPhotos(items: [PhotosPickerItem], into appState: AppState) {
+    /// `onFirstAdded` fires once, with the first photo's id, as soon as it
+    /// is in the library (before analysis) — the gallery opens its preview.
+    func importPhotos(
+        items: [PhotosPickerItem],
+        into appState: AppState,
+        onFirstAdded: (@MainActor (UUID) -> Void)? = nil
+    ) {
         Task {
+            var isFirst = true
             for item in items {
                 guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
                 // Decode off-main — PhotosPicker payloads can be multi‑MB HEICs.
                 guard let raw = await Task.detached(priority: .utility, operation: {
                     UIImage(data: data)
                 }).value else { continue }
-                appState.importReference(raw: raw, data: data)
+                appState.importReference(
+                    raw: raw,
+                    data: data,
+                    onAdded: isFirst ? onFirstAdded : nil
+                )
+                isFirst = false
             }
         }
     }

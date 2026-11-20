@@ -12,12 +12,81 @@ class CameraViewModel: ObservableObject {
     @Published var isFocused:     Bool = false
     @Published var isLocked:      Bool = false
 
-    // Tool drawer (⋯) toggles, Apple Camera-style.
-    @Published var isDrawerOpen:        Bool = false
+    /// Grid toggle from the ⋯ menu; seeded from the Settings default.
     @Published var isGridVisible:       Bool = true
-    @Published var isLevelVisible:      Bool = true
-    @Published var isHeadCircleVisible: Bool = true
-    @Published var tipsEnabled:         Bool = true
+
+    // MARK: Visual-aid state machine (UX-SPEC §4)
+
+    /// Adaptive starts at Overlay and moves once to Guides after stable person
+    /// detection. Any manual selection ends adaptation for this reference
+    /// phase; re-tapping the active mode enters Clean (not Adaptive).
+    enum AidMode: Equatable {
+        case adaptiveOverlay, adaptiveGuides
+        case manualOverlay, manualGuides, manualClean
+
+        var showsOverlay: Bool { self == .adaptiveOverlay || self == .manualOverlay }
+        var showsGuides: Bool { self == .adaptiveGuides || self == .manualGuides }
+        var isManualOverlay: Bool { self == .manualOverlay }
+        var isManualGuides: Bool { self == .manualGuides }
+    }
+    @Published private(set) var aidMode: AidMode = .adaptiveOverlay
+
+    /// Person seen continuously for this long → adaptive Overlay → Guides.
+    static let stableDetectionDelay: TimeInterval = 1.5
+    private var personSeenSince: Date?
+
+    /// True while live Vision currently sees a subject. Drives
+    /// "Looking for subject" in the coaching pill.
+    @Published private(set) var isSubjectDetected = false
+
+    /// User tapped the coaching pill closed. Session-scoped; survives
+    /// detection drops and reference switches.
+    @Published var isCoachingCollapsed = false
+
+    func toggleOverlayMode() {
+        setAidMode(aidMode == .manualOverlay ? .manualClean : .manualOverlay)
+    }
+
+    func toggleGuidesMode() {
+        setAidMode(aidMode == .manualGuides ? .manualClean : .manualGuides)
+    }
+
+    private func setAidMode(_ mode: AidMode) {
+        UISelectionFeedbackGenerator().selectionChanged()
+        withAnimation(.easeOut(duration: 0.25)) { aidMode = mode }
+    }
+
+    /// New camera session or new reference: back to adaptive Overlay.
+    private func restartAdaptation() {
+        personSeenSince = nil
+        aidMode = .adaptiveOverlay
+    }
+
+    /// Called on each live-vision update.
+    private func advanceAdaptation(subjectPresent: Bool, now: Date = Date()) {
+        if isSubjectDetected != subjectPresent { isSubjectDetected = subjectPresent }
+        guard subjectPresent else {
+            // Brief dropouts don't reverse an adaptive Guides transition;
+            // they only reset the stability timer while still in Overlay.
+            personSeenSince = nil
+            return
+        }
+        guard aidMode == .adaptiveOverlay else { return }
+        if let since = personSeenSince {
+            if now.timeIntervalSince(since) >= Self.stableDetectionDelay {
+                withAnimation(.easeOut(duration: 0.4)) { aidMode = .adaptiveGuides }
+            }
+        } else {
+            personSeenSince = now
+        }
+    }
+
+    // MARK: Alignment confirmation
+
+    /// Brief "Looking good" after alignment latches, then the pill reduces
+    /// to a yellow check while alignment holds.
+    @Published private(set) var showsAlignedConfirmation = false
+    private var alignedConfirmationTask: Task<Void, Never>?
 
     @Published var zoomFactor:    CGFloat = 1
     @Published var isFrontCamera: Bool = false
@@ -67,6 +136,11 @@ class CameraViewModel: ObservableObject {
 
     private var activeSpec: ShotSpec?
     private let coach = CompositionCoach()
+    #if DEBUG
+    /// Debug-only coaching eval (`⋯` → Coaching Eval; docs/coaching-eval.md).
+    let eval = CoachEval()
+    @Published var isEvalHUDVisible = false
+    #endif
     private let liveAnalyzer = LiveVisionAnalyzer()
     private var liveDetection: LiveVisionAnalyzer.Subject?
     private var liveContentSize: CGSize = .zero
@@ -98,20 +172,34 @@ class CameraViewModel: ObservableObject {
     /// Debounces the single-shot path: a fast double-tap on the shutter
     /// shouldn't queue a second full-quality capture before the first's
     /// completion runs. Burst bypasses this and overlaps captures on purpose.
-    private var isCapturing = false
+    /// Single-tap captures still processing. Taps overlap like the native
+    /// Camera; the cap only stops a runaway queue on a stalled pipeline.
+    private var inflightTapCaptures = 0
+    /// Kept prepared so the shutter haptic lands on the same frame as the tap.
+    private let shutterHaptic = UIImpactFeedbackGenerator(style: .medium)
     /// Suspended while AppState runs restore/import Vision so live pose
     /// doesn't contend with the Neural Engine for the preview pipeline.
     private var liveVisionSuspended = false
     private var cancellables = Set<AnyCancellable>()
+
+    /// The live feed is running and done with any reference zoom ramp — the
+    /// Recreate scan holds until this is true so the camera is revealed
+    /// already steady, never mid-start or mid-zoom.
+    @Published private(set) var isFeedSettled = false
+    private var isSessionRunning = false
+    private var isZoomSettling = false
+    private var zoomSettleTask: Task<Void, Never>?
+
+    private func updateFeedSettled() {
+        let settled = isSessionRunning && !isZoomSettling
+        if isFeedSettled != settled { isFeedSettled = settled }
+    }
 
     /// Seeds the drawer toggles from Settings' persisted defaults. The
     /// in-drawer toggle itself stays session-only and never writes back —
     /// Settings is the only place that changes what a fresh session starts with.
     init() {
         isGridVisible = Self.storedDefault(.gridVisible)
-        isLevelVisible = Self.storedDefault(.levelVisible)
-        isHeadCircleVisible = Self.storedDefault(.headCircleVisible)
-        tipsEnabled = Self.storedDefault(.tipsEnabled)
     }
 
     enum DefaultsKey: String {
@@ -143,12 +231,18 @@ class CameraViewModel: ObservableObject {
 
     func onAppear(spec: ShotSpec?) {
         activeSpec = spec
+        restartAdaptation()
         applySpec(spec)
         camera.configure()
         observeMotion()
         observeCamera()
         observeForeground()
         wireVideoFrames()
+    }
+
+    /// "Continue" on the camera-access explanation: shows the system prompt.
+    func requestCameraAccess() {
+        camera.configure(requestIfNeeded: true)
     }
 
     func onDisappear() {
@@ -173,10 +267,12 @@ class CameraViewModel: ObservableObject {
             levelHapticFired = false
             allClearHapticFired = false
             motion.start()
+            restartAdaptation()   // re-entering the camera is a new guidance phase
         } else {
             motion.stop()
             activeTip = nil
             activeTipKind = nil
+            isSubjectDetected = false
             // Frames stop flowing while inactive (wireVideoFrames gates on
             // this flag) — drop the last detection so re-entry can't coach
             // against a stale subject.
@@ -197,6 +293,8 @@ class CameraViewModel: ObservableObject {
         applySpec(spec)
         compositionProgress = CompositionProgress()
         allClearHapticFired = false
+        endAlignedConfirmation()
+        restartAdaptation()
     }
 
     // MARK: Actions
@@ -266,6 +364,33 @@ class CameraViewModel: ObservableObject {
         }
     }
 
+    // MARK: Zoom fine-adjust (D-22)
+
+    /// Horizontal drag across the zoom row: left zooms in, right zooms out,
+    /// exponential so each lens step takes a similar swipe. Shares the
+    /// pinch path; a tick when the zoom crosses a lens preset.
+    @Published private(set) var isZoomScrubbing = false
+
+    func handleZoomScrubChanged(translation: CGFloat) {
+        isZoomScrubbing = true
+        let before = activeZoomLevel
+        handlePinchChanged(exp(-translation / 140))
+        if activeZoomLevel != before { UISelectionFeedbackGenerator().selectionChanged() }
+    }
+
+    func handleZoomScrubEnded() {
+        isZoomScrubbing = false
+        handlePinchEnded()
+    }
+
+    /// VoiceOver adjustable action on the zoom row.
+    func stepZoom(up: Bool) {
+        let target = min(max(zoomFactor * (up ? 1.25 : 0.8), minZoom), maxZoom)
+        zoomFactor = target
+        camera.setZoom(target, animated: true)
+        evaluateCoaching()
+    }
+
     /// Pill taps ramp to the target like the native app; pinch stays direct.
     func setZoom(_ factor: CGFloat) {
         zoomFactor = factor
@@ -290,22 +415,27 @@ class CameraViewModel: ObservableObject {
         camera.setZoom(zoomFactor)
     }
 
+    /// Feedback is immediate — haptic and blink fire on the tap, never on
+    /// photo completion (full-quality processing can take ~1s). Processing
+    /// runs in the background while the user keeps shooting.
     func capturePhoto(completion: @escaping (UIImage?) -> Void) {
-        guard !isCapturing else { return }
-        isCapturing = true
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        guard inflightTapCaptures < 4 else { return }
+        inflightTapCaptures += 1
+        shutterHaptic.impactOccurred()
+        triggerShutterBlink()
+        shutterHaptic.prepare()
         camera.capturePhoto(flashMode: flashMode) { [weak self] image in
             DispatchQueue.main.async {
-                self?.isCapturing = false
-                if image == nil {
-                    self?.showCaptureFailureNotice()
-                } else {
-                    self?.triggerShutterBlink()
-                }
+                guard let self else { return }
+                self.inflightTapCaptures = max(0, self.inflightTapCaptures - 1)
+                if image == nil { self.showCaptureFailureNotice() }
                 completion(image)
             }
         }
     }
+
+    /// Warm the Taptic Engine when the finger lands on the shutter.
+    func prepareShutter() { shutterHaptic.prepare() }
 
     /// Fires captures on a fixed 0.1s cadence while the shutter is held — the
     /// native app's burst rate — overlapping captures instead of waiting for
@@ -367,15 +497,6 @@ class CameraViewModel: ObservableObject {
         }
     }
 
-    func cycleFlash() {
-        switch flashMode {
-        case .off:  flashMode = .auto
-        case .auto: flashMode = .on
-        default:    flashMode = .off
-        }
-        UISelectionFeedbackGenerator().selectionChanged()
-    }
-
     // MARK: Overlay opacity
 
     func overlayOpacity(whenFocused target: Double = 0) -> Double {
@@ -387,8 +508,10 @@ class CameraViewModel: ObservableObject {
         return aspectSatisfied ? 0 : 1
     }
 
-    func showTipBanner(aspectSatisfied: Bool) -> Bool {
-        tipsEnabled && !isFocused && !aspectSatisfied && activeTip != nil
+    /// Binary one-tap flash (approved V2): off ↔ on. Auto is not offered.
+    func toggleFlash() {
+        flashMode = flashMode == .on ? .off : .on
+        UISelectionFeedbackGenerator().selectionChanged()
     }
 
     func updateViewfinderSize(_ size: CGSize) {
@@ -443,6 +566,15 @@ class CameraViewModel: ObservableObject {
            abs(zoomFactor - spec.recommendedZoom) > 0.01 {
             zoomFactor = spec.recommendedZoom
             camera.setZoom(spec.recommendedZoom, animated: true)
+            isZoomSettling = true
+            updateFeedSettled()
+            zoomSettleTask?.cancel()
+            zoomSettleTask = Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(450))   // ramp + margin
+                guard let self, !Task.isCancelled else { return }
+                self.isZoomSettling = false
+                self.updateFeedSettled()
+            }
         }
     }
 
@@ -452,6 +584,10 @@ class CameraViewModel: ObservableObject {
             self.liveDetection = subject
             self.liveContentSize = contentSize
             self.lightingScore = lighting
+            // `subject` is a value, never nil — presence is a detected body
+            // box. (Comparing the struct to nil was always true, so Overlay
+            // flipped to Guides 1.5s after opening even with nobody there.)
+            self.advanceAdaptation(subjectPresent: subject.box != nil)
             self.evaluateCoaching()
         }
         camera.onVideoFrame = { [weak self] buffer in
@@ -538,6 +674,25 @@ class CameraViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in self?.cameraAuthorizationState = state }
             .store(in: &cancellables)
+
+        camera.$isRunning
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] running in
+                guard let self else { return }
+                if running {
+                    // First frames reach the preview a beat after startRunning.
+                    Task { [weak self] in
+                        try? await Task.sleep(for: .milliseconds(150))
+                        guard let self, self.camera.isRunning else { return }
+                        self.isSessionRunning = true
+                        self.updateFeedSettled()
+                    }
+                } else {
+                    self.isSessionRunning = false
+                    self.updateFeedSettled()
+                }
+            }
+            .store(in: &cancellables)
     }
 
     /// Catches "granted camera access in Settings, returned to the app"
@@ -589,6 +744,9 @@ class CameraViewModel: ObservableObject {
                 if isLevel && !self.levelHapticFired {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     self.levelHapticFired = true
+                    #if DEBUG
+                    if self.isEvalHUDVisible { self.eval.noteLevelHaptic() }
+                    #endif
                 } else if !isLevel {
                     self.levelHapticFired = false
                 }
@@ -603,13 +761,16 @@ class CameraViewModel: ObservableObject {
             return
         }
 
+        let liveSubject = liveSubjectInViewfinder()
+        let headOffset = liveHeadOffset(spec: spec)
+        let shoulderRatio = liveShoulderRatio(spec: spec)
         let output = coach.evaluate(
             CompositionCoach.Input(
                 spec: spec,
-                liveSubject: liveSubjectInViewfinder(),
+                liveSubject: liveSubject,
                 referenceSubject: referenceSubjectInViewfinder(spec: spec),
-                headOffset: liveHeadOffset(spec: spec),
-                shoulderRatio: liveShoulderRatio(spec: spec),
+                headOffset: headOffset,
+                shoulderRatio: shoulderRatio,
                 roll: deviceRoll,
                 pitch: devicePitch,
                 zoom: zoomFactor,
@@ -622,12 +783,52 @@ class CameraViewModel: ObservableObject {
         activeTip = output.tip
         activeTipKind = output.tipKind
 
+        #if DEBUG
+        if isEvalHUDVisible {
+            let degrees = 180 / Double.pi
+            eval.record(CoachEval.Snapshot(
+                subjectDetected: liveSubject != nil || headOffset != nil,
+                headOffset: headOffset.map { hypot($0.dx, $0.dy) },
+                shoulderRatio: shoulderRatio,
+                rollErrorDegrees: spec.hasTrustedRoll ? (deviceRoll - spec.coachRollTarget) * degrees : nil,
+                pitchErrorDegrees: spec.hasTrustedPitch ? (devicePitch - (spec.targetPitch ?? 0)) * degrees : nil,
+                lighting: lightingScore,
+                progress: output.progress,
+                tip: output.tip
+            ))
+        }
+        #endif
+
+        // One subtle haptic + brief confirmation per alignment. allSatisfied
+        // already carries the coach's hysteresis, so this re-arms only after
+        // a real misalignment.
         if output.progress.allSatisfied && !allClearHapticFired {
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
             allClearHapticFired = true
+            beginAlignedConfirmation()
+            #if DEBUG
+            if isEvalHUDVisible { eval.noteAlignment() }
+            #endif
         } else if !output.progress.allSatisfied {
             allClearHapticFired = false
+            endAlignedConfirmation()
         }
 
+    }
+
+    private func beginAlignedConfirmation() {
+        alignedConfirmationTask?.cancel()
+        withAnimation(.easeOut(duration: 0.2)) { showsAlignedConfirmation = true }
+        alignedConfirmationTask = Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.25)) { self.showsAlignedConfirmation = false }
+        }
+    }
+
+    private func endAlignedConfirmation() {
+        alignedConfirmationTask?.cancel()
+        alignedConfirmationTask = nil
+        showsAlignedConfirmation = false
     }
 }

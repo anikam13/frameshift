@@ -17,9 +17,13 @@ nonisolated struct ReferenceStore {
             var analysisFailed: Bool?
             var spec: ShotSpec?
             var bundledAssetName: String?
+            var isFavorite: Bool?
+            var useCount: Int?
+            var lastUsedAt: Date?
 
             private enum CodingKeys: String, CodingKey {
                 case id, importedAt, analyzerVersion, analysisFailed, spec, bundledAssetName
+                case isFavorite, useCount, lastUsedAt
             }
 
             init(
@@ -28,7 +32,10 @@ nonisolated struct ReferenceStore {
                 analyzerVersion: Int? = nil,
                 analysisFailed: Bool? = nil,
                 spec: ShotSpec? = nil,
-                bundledAssetName: String? = nil
+                bundledAssetName: String? = nil,
+                isFavorite: Bool? = nil,
+                useCount: Int? = nil,
+                lastUsedAt: Date? = nil
             ) {
                 self.id = id
                 self.importedAt = importedAt
@@ -36,6 +43,9 @@ nonisolated struct ReferenceStore {
                 self.analysisFailed = analysisFailed
                 self.spec = spec
                 self.bundledAssetName = bundledAssetName
+                self.isFavorite = isFavorite
+                self.useCount = useCount
+                self.lastUsedAt = lastUsedAt
             }
 
             init(from decoder: Decoder) throws {
@@ -45,6 +55,9 @@ nonisolated struct ReferenceStore {
                 analyzerVersion = try c.decodeIfPresent(Int.self, forKey: .analyzerVersion)
                 analysisFailed = try c.decodeIfPresent(Bool.self, forKey: .analysisFailed)
                 bundledAssetName = try c.decodeIfPresent(String.self, forKey: .bundledAssetName)
+                isFavorite = try c.decodeIfPresent(Bool.self, forKey: .isFavorite)
+                useCount = try c.decodeIfPresent(Int.self, forKey: .useCount)
+                lastUsedAt = try c.decodeIfPresent(Date.self, forKey: .lastUsedAt)
                 // A single stale/partial ShotSpec must not fail the whole
                 // library decode (that used to wipe references from memory).
                 if c.contains(.spec), try c.decodeNil(forKey: .spec) == false {
@@ -62,6 +75,9 @@ nonisolated struct ReferenceStore {
                 try c.encodeIfPresent(analysisFailed, forKey: .analysisFailed)
                 try c.encodeIfPresent(spec, forKey: .spec)
                 try c.encodeIfPresent(bundledAssetName, forKey: .bundledAssetName)
+                try c.encodeIfPresent(isFavorite, forKey: .isFavorite)
+                try c.encodeIfPresent(useCount, forKey: .useCount)
+                try c.encodeIfPresent(lastUsedAt, forKey: .lastUsedAt)
             }
         }
         var activeReferenceID: UUID?
@@ -76,6 +92,9 @@ nonisolated struct ReferenceStore {
         let spec: ShotSpec?
         let analysisFailed: Bool
         let bundledAssetName: String?
+        let isFavorite: Bool
+        let useCount: Int
+        let lastUsedAt: Date?
         /// True when cached analysis is missing or version-stale.
         let needsAnalysis: Bool
         /// Cutout PNG exists on disk — load via `loadCutout` when needed.
@@ -171,6 +190,9 @@ nonisolated struct ReferenceStore {
                 spec: spec,
                 analysisFailed: failed,
                 bundledAssetName: entry.bundledAssetName,
+                isFavorite: entry.isFavorite ?? false,
+                useCount: entry.useCount ?? 0,
+                lastUsedAt: entry.lastUsedAt,
                 needsAnalysis: needsAnalysis,
                 hasCutoutOnDisk: hasCutout && !needsAnalysis && !failed
             )

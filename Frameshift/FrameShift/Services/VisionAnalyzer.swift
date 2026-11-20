@@ -29,11 +29,21 @@ nonisolated struct VisionAnalyzer {
         // FR-12: one batch per import. Landmarks piggyback on the same pass —
         // when no face exists the request just returns empty.
         do {
-            try handler.perform([
+            var requests: [VNRequest] = [
                 bodyRequest, upperRequest, horizonRequest, poseRequest,
                 faceRectRequest, faceLandmarksRequest
-            ])
+            ]
+            #if targetEnvironment(simulator)
+            // The Simulator runtime ships without the body-pose model, and
+            // one failed request fails the whole batch. Pose is optional.
+            requests.removeAll { $0 === poseRequest }
+            VNRequest.simulatorCPU(requests)
+            #endif
+            try handler.perform(requests)
         } catch {
+            #if DEBUG
+            NSLog("FSVISION perform failed: %@", String(describing: error))
+            #endif
             return nil
         }
 
@@ -48,7 +58,12 @@ nonisolated struct VisionAnalyzer {
 
         // A usable spec needs a body or at least a face (US-107: face-less
         // imports fall back; person-less imports return nil as before).
-        guard bodyObs != nil || faceObs != nil else { return nil }
+        guard bodyObs != nil || faceObs != nil else {
+            #if DEBUG
+            NSLog("FSVISION no body or face")
+            #endif
+            return nil
+        }
 
         let faceBox = faceObs.map { uiKitBox($0.boundingBox) }
         let body = bodyObs.map { uiKitBox($0.boundingBox) } ?? syntheticBody(from: faceBox!)

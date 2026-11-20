@@ -1,10 +1,22 @@
 import SwiftUI
 
-/// App shell — the camera IS the app, like the native Camera. Mode switching
-/// (REFERENCE · CAMERA) lives in CameraView's bottom pill, and the gallery
-/// opens from the bottom-left thumbnail.
+/// App shell. `CameraView` hosts both surfaces: the gallery home
+/// (`selectedTab == .references`) layered over an always-mounted camera.
+/// Launch always lands on the gallery (D-2); first launch shows the
+/// welcome on top while the camera starts underneath (D-34).
 struct RootTabView: View {
+    @AppStorage(Welcome.doneKey) private var welcomeDone = false
+
     var body: some View {
-        CameraView()
+        ZStack {
+            CameraView()
+            if !welcomeDone {
+                WelcomeView {
+                    welcomeDone = true   // already faded out
+                }
+                .transition(.opacity)
+                .zIndex(1)
+            }
+        }
     }
 }

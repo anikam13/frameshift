@@ -3,19 +3,10 @@ import SwiftUI
 @main
 struct FrameShiftApp: App {
     @StateObject private var appState = AppState()
-    @AppStorage("frameshift.hasCompletedOnboarding") private var hasCompletedOnboarding = false
-
     var body: some Scene {
         WindowGroup {
-            Group {
-                if hasCompletedOnboarding {
-                    RootTabView()
-                } else {
-                    OnboardingView()
-                }
-            }
+            RootTabView()
             .environmentObject(appState)
-            .preferredColorScheme(.dark)
             .task {
                 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("-uitest-seed-references") {
@@ -25,12 +16,16 @@ struct FrameShiftApp: App {
                 #endif
                 await appState.restoreReferences()
             }
-            .task { await appState.restoreCapturedShots() }
-            .task { await appState.restoreFilterPresets() }
-            .onChange(of: hasCompletedOnboarding) { _, completed in
-                if completed {
-                    appState.resumeDeferredAnalysisAfterOnboarding()
+            .task {
+                await appState.restoreSessionFromPreviousLaunch()
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-preview-seed-session") {
+                    while !appState.hasFinishedRestoringReferences {
+                        try? await Task.sleep(for: .milliseconds(100))
+                    }
+                    appState.seedSessionForPreview()
                 }
+                #endif
             }
         }
     }

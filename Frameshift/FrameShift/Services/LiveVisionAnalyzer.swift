@@ -24,6 +24,14 @@ nonisolated final class LiveVisionAnalyzer: @unchecked Sendable {
         var isEmpty: Bool { box == nil && headCenter == nil }
     }
 
+    /// Below this a human rectangle is treated as no one there.
+    #if targetEnvironment(simulator)
+    /// The Simulator's CPU-only detector scores people much lower.
+    static let minimumHumanConfidence: Float = 0.1
+    #else
+    static let minimumHumanConfidence: Float = 0.6
+    #endif
+
     private var lastProcessed = Date.distantPast
     /// ~3 fps: fast enough that framing feedback tracks a moving subject;
     /// rectangles + pose at this cadence stay a rounding error next to the
@@ -64,14 +72,24 @@ nonisolated final class LiveVisionAnalyzer: @unchecked Sendable {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self else { return }
             do {
+                #if targetEnvironment(simulator)
+                VNRequest.simulatorCPU([rectsRequest])
+                try handler.perform([rectsRequest])  // no pose model in the Simulator
+                #else
                 try handler.perform([rectsRequest, poseRequest])
+                #endif
             } catch {
                 self.publish(subject: Subject(), lighting: 0.4, contentSize: orientedSize)
                 return
             }
 
             var subject = Subject()
-            if let obs = rectsRequest.results?.first {
+            // Low-confidence rectangles are clutter (coats on chairs,
+            // posters); they must not count as a person — they drive the
+            // Overlay → Guides switch and "Looking for subject".
+            if let obs = rectsRequest.results?
+                .filter({ $0.confidence >= Self.minimumHumanConfidence })
+                .max(by: { $0.boundingBox.height < $1.boundingBox.height }) {
                 let box = obs.boundingBox
                 subject.box = CGRect(
                     x: box.minX,
@@ -80,7 +98,7 @@ nonisolated final class LiveVisionAnalyzer: @unchecked Sendable {
                     height: box.height
                 )
             }
-            if let pose = poseRequest.results?.first {
+            if subject.box != nil, let pose = poseRequest.results?.first {
                 subject.leftShoulder = Self.uiKitPoint(pose, .leftShoulder)
                 subject.rightShoulder = Self.uiKitPoint(pose, .rightShoulder)
                 // Head center needs at least nose + neck, mirroring the

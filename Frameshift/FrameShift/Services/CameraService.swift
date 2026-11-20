@@ -9,6 +9,9 @@ class CameraService: NSObject, ObservableObject {
     private let photoOutput = AVCapturePhotoOutput()
     private let videoOutput = AVCaptureVideoDataOutput()
     private let sessionQueue = DispatchQueue(label: "frameshift.session")
+    /// Decode + crop of finished photos. Kept off sessionQueue so a full-size
+    /// decode never holds up the next capturePhoto call (rapid taps).
+    private let photoProcessingQueue = DispatchQueue(label: "frameshift.photo-processing", qos: .userInitiated)
     private let videoQueue = DispatchQueue(label: "frameshift.video", qos: .userInitiated)
 
     private var videoInput: AVCaptureDeviceInput?
@@ -35,7 +38,7 @@ class CameraService: NSObject, ObservableObject {
     /// Called on `videoQueue` with each sampled frame (throttled to ~1 fps by the consumer).
     var onVideoFrame: ((CVPixelBuffer) -> Void)?
 
-    enum AuthorizationState { case unknown, authorized, denied }
+    enum AuthorizationState { case unknown, notDetermined, authorized, denied }
 
     @Published var isRunning = false
     @Published private(set) var authorizationState: AuthorizationState = .unknown
@@ -59,7 +62,17 @@ class CameraService: NSObject, ObservableObject {
     /// Safe to call repeatedly (e.g. on every foreground return): re-resolves
     /// authorization in case it changed in Settings, and setupSession() is
     /// itself a no-op once the session is already running.
-    func configure() {
+    /// `requestIfNeeded: false` never shows the system prompt — the camera
+    /// asks at the point of need, after FrameShift's own explanation (D-28).
+    func configure(requestIfNeeded: Bool = false) {
+        #if DEBUG && targetEnvironment(simulator)
+        if let feed = SimulatedCameraFeed.shared {
+            authorizationState = .authorized
+            feed.start(on: videoQueue) { [weak self] buffer in self?.onVideoFrame?(buffer) }
+            isRunning = true
+            return
+        }
+        #endif
         observeInterruptions()
         let status = AVCaptureDevice.authorizationStatus(for: .video)
         switch status {
@@ -69,7 +82,10 @@ class CameraService: NSObject, ObservableObject {
             authorizationState = .denied
             return
         case .notDetermined:
-            break
+            guard requestIfNeeded else {
+                authorizationState = .notDetermined
+                return
+            }
         @unknown default:
             authorizationState = .denied
             return
@@ -124,11 +140,13 @@ class CameraService: NSObject, ObservableObject {
             session.addOutput(videoOutput)
         }
         session.commitConfiguration()
+        configureResponsiveCapture()
 
         displayZoom = 1
         applyZoom(1, animated: false)
 
         session.startRunning()
+        preparePhotoPipeline()
         DispatchQueue.main.async {
             self.isRunning = self.session.isRunning
             self.hasUltraWide = ultraWideAvailable
@@ -161,6 +179,13 @@ class CameraService: NSObject, ObservableObject {
     }
 
     func stop() {
+        #if DEBUG && targetEnvironment(simulator)
+        if let feed = SimulatedCameraFeed.shared {
+            feed.stop()
+            isRunning = false
+            return
+        }
+        #endif
         guard session.isRunning else { return }
         sessionQueue.async {
             self.session.stopRunning()
@@ -180,6 +205,8 @@ class CameraService: NSObject, ObservableObject {
             if let device { self.swapInput(to: device) }
             self.session.commitConfiguration()
             self.updateMaxPhotoDimensions()
+            self.configureResponsiveCapture()
+            self.preparePhotoPipeline()
             self.displayZoom = zoom
             self.applyZoom(zoom, animated: false)
             // The incoming device may hold a bias from its last use.
@@ -298,34 +325,34 @@ class CameraService: NSObject, ObservableObject {
     ) {
         // Visible preview region in normalized capture coordinates.
         // Layer bounds must be read on the main thread, so resolve before hopping queues.
+        #if DEBUG && targetEnvironment(simulator)
+        if let feed = SimulatedCameraFeed.shared {
+            let bounds = previewLayer?.bounds.size ?? .zero
+            photoProcessingQueue.async {
+                let shot = feed.capture(visibleIn: bounds)
+                DispatchQueue.main.async { completion(shot) }
+            }
+            return
+        }
+        #endif
         let cropRect = previewLayer.map {
             $0.metadataOutputRectConverted(fromLayerRect: $0.bounds)
         }
         sessionQueue.async {
-            if let connection = self.photoOutput.connection(with: .video),
-               connection.isVideoMirroringSupported {
-                connection.automaticallyAdjustsVideoMirroring = false
-                connection.isVideoMirrored = (self.currentPosition == .front)
+            // capturePhoto throws (uncaught NSException) without a live video
+            // connection — session interrupted, not yet running, or no camera
+            // (Simulator). Fail the shot instead of crashing.
+            guard let videoConnection = self.photoOutput.connection(with: .video),
+                  videoConnection.isActive, videoConnection.isEnabled else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            if videoConnection.isVideoMirroringSupported {
+                videoConnection.automaticallyAdjustsVideoMirroring = false
+                videoConnection.isVideoMirrored = (self.currentPosition == .front)
             }
 
-            // Match the native Camera app: HEVC, full resolution, Deep Fusion /
-            // Smart HDR via quality prioritization.
-            let settings: AVCapturePhotoSettings
-            if self.photoOutput.availablePhotoCodecTypes.contains(.hevc) {
-                settings = AVCapturePhotoSettings(
-                    format: [AVVideoCodecKey: AVVideoCodecType.hevc]
-                )
-            } else {
-                settings = AVCapturePhotoSettings()
-            }
-            if self.photoOutput.maxPhotoDimensions.width > 0 {
-                settings.maxPhotoDimensions = self.photoOutput.maxPhotoDimensions
-            }
-            settings.photoQualityPrioritization = prioritization
-            // Front camera reports screen-flash support here on modern iPhones.
-            if self.photoOutput.supportedFlashModes.contains(flashMode) {
-                settings.flashMode = flashMode
-            }
+            let settings = self.makePhotoSettings(flashMode: flashMode, prioritization: prioritization)
             self.pendingCaptures[settings.uniqueID] = PendingCapture(
                 completion: completion, cropRect: cropRect
             )
@@ -379,6 +406,60 @@ class CameraService: NSObject, ObservableObject {
         }
     }
 
+    /// Match the native Camera app: HEVC, full resolution, Deep Fusion /
+    /// Smart HDR via quality prioritization. Call on sessionQueue.
+    private func makePhotoSettings(
+        flashMode: AVCaptureDevice.FlashMode,
+        prioritization: AVCapturePhotoOutput.QualityPrioritization
+    ) -> AVCapturePhotoSettings {
+        let settings: AVCapturePhotoSettings
+        if photoOutput.availablePhotoCodecTypes.contains(.hevc) {
+            settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
+        } else {
+            settings = AVCapturePhotoSettings()
+        }
+        if photoOutput.maxPhotoDimensions.width > 0 {
+            settings.maxPhotoDimensions = photoOutput.maxPhotoDimensions
+        }
+        settings.photoQualityPrioritization = prioritization
+        // Front camera reports screen-flash support here on modern iPhones.
+        if photoOutput.supportedFlashModes.contains(flashMode) {
+            settings.flashMode = flashMode
+        }
+        return settings
+    }
+
+    /// Pre-allocates the capture pipeline for the settings the shutter will
+    /// use (tap = quality, burst = speed). Without this the first capture
+    /// after the session starts pays the setup cost — a visible stall on the
+    /// first tap. Call on sessionQueue whenever the input/format changes.
+    private func preparePhotoPipeline() {
+        guard photoOutput.connection(with: .video) != nil else { return }
+        let prepared = [
+            makePhotoSettings(flashMode: .off, prioritization: .quality),
+            makePhotoSettings(flashMode: .off, prioritization: .speed),
+        ]
+        photoOutput.setPreparedPhotoSettingsArray(prepared, completionHandler: nil)
+    }
+
+    /// Shutter responsiveness (iOS 17): zero shutter lag captures the frame
+    /// from the moment of the tap; responsive capture overlaps processing so
+    /// the next shot can start before the last one finishes; fast capture
+    /// prioritization trades quality for speed under rapid taps instead of
+    /// queueing. Support depends on the active device/format, so this runs
+    /// after every input change. Call on sessionQueue.
+    private func configureResponsiveCapture() {
+        if photoOutput.isZeroShutterLagSupported {
+            photoOutput.isZeroShutterLagEnabled = true
+        }
+        if photoOutput.isResponsiveCaptureSupported {
+            photoOutput.isResponsiveCaptureEnabled = true
+            if photoOutput.isFastCapturePrioritizationSupported {
+                photoOutput.isFastCapturePrioritizationEnabled = true
+            }
+        }
+    }
+
     private func swapInput(to device: AVCaptureDevice) {
         guard let input = try? AVCaptureDeviceInput(device: device) else { return }
         if let existing = videoInput { session.removeInput(existing) }
@@ -423,12 +504,14 @@ nonisolated extension CameraService: AVCapturePhotoCaptureDelegate {
         let data = (error == nil) ? photo.fileDataRepresentation() : nil
         sessionQueue.async {
             guard let pending = self.pendingCaptures.removeValue(forKey: id) else { return }
-            guard let data, let image = UIImage(data: data) else {
-                DispatchQueue.main.async { pending.completion(nil) }
-                return
+            self.photoProcessingQueue.async {
+                guard let data, let image = UIImage(data: data) else {
+                    DispatchQueue.main.async { pending.completion(nil) }
+                    return
+                }
+                let result = Self.cropped(image, toNormalizedRect: pending.cropRect)
+                DispatchQueue.main.async { pending.completion(result) }
             }
-            let result = Self.cropped(image, toNormalizedRect: pending.cropRect)
-            DispatchQueue.main.async { pending.completion(result) }
         }
     }
 
