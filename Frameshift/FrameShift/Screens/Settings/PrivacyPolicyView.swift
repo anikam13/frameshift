@@ -10,12 +10,12 @@ struct PrivacyPolicyView: View {
         var id: String { title }
     }
 
-    private let lastUpdated = "July 8, 2026"
+    private let lastUpdated = "November 24, 2026"
 
     private let sections: [Section] = [
         Section(
             title: "Information We Collect",
-            body: "FrameShift does not collect, transmit, or store any information outside of your device. There are no accounts, no sign-in, and no network requests of any kind — the app has no backend server to send data to, even if it wanted to."
+            body: "FrameShift does not collect, transmit, or store any information outside of your device. There are no accounts and no sign-in, and the app has no backend server to send data to.\n\nThe app makes one kind of network request: on launch it downloads the list of curated Explore reference photos, and any new photos on it, from a public website (anikam13.github.io). These are plain downloads of public files. Nothing about you, your device, or your photos is sent with them — no identifiers, cookies, or analytics. If you're offline, the app works normally with the photos it already has."
         ),
         Section(
             title: "Camera Access",

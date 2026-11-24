@@ -1,6 +1,6 @@
 # FrameShift Privacy Policy
 
-**Last updated: July 8, 2026**
+**Last updated: November 24, 2026**
 
 FrameShift is designed to work entirely on your device. This policy explains exactly what that means.
 
