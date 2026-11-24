@@ -2,6 +2,9 @@ import Foundation
 
 /// Bundled starter references for the cold-start empty state — the app is
 /// useless until a reference exists, and new users may have nothing saved.
+/// All AI-generated stills from Gemini (Nano Banana). The later 9 used
+/// Pinterest poses as composition references only, with new models,
+/// clothing and backgrounds generated (no real person's likeness).
 /// Bundled in Assets.xcassets so first launch works fully offline. Newer
 /// Explore photos arrive through `RemoteReferenceFeed` without an app update;
 /// this pack stays the offline fallback.
