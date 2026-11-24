@@ -262,7 +262,7 @@ struct ReferencePickerSheet: View {
 }
 
 /// Explore composition chips. Curated photos use their hand tags
-/// (`SampleReferencePack.tags`); imports fall back to `ShotSpec.framing`.
+/// (`CuratedCatalog`: bundled + remote feed); imports fall back to `ShotSpec.framing`.
 enum CompositionFilter: CaseIterable, Hashable {
     case all, fullBody, portraits, seated, couples, groups
 
@@ -278,7 +278,7 @@ enum CompositionFilter: CaseIterable, Hashable {
     }
 
     func matches(_ ref: ReferencePhoto) -> Bool {
-        if self != .all, let name = ref.bundledAssetName, let tags = SampleReferencePack.tags[name] {
+        if self != .all, let name = ref.bundledAssetName, let tags = CuratedCatalog.tags(for: name) {
             return tags.contains(self)
         }
         switch self {

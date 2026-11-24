@@ -61,6 +61,7 @@ class AppState: ObservableObject {
     /// the library is empty). UI that keys off `hasReferences` must wait on
     /// this so cold start doesn't flash the empty-state hint over the mode pill.
     @Published private(set) var hasFinishedRestoringReferences = false
+    private var hasSyncedRemoteReferences = false
 
     private let store = ReferenceStore()
     private let analyzer = VisionAnalyzer()
@@ -209,7 +210,23 @@ class AppState: ObservableObject {
         return favorites + recents
     }
 
-    var curatedReferences: [ReferencePhoto] { references.filter(\.isCurated) }
+    /// Explore order: shuffled once per launch, stable while the app runs
+    /// (chips, camera round-trips and new feed photos don't reshuffle).
+    var curatedReferences: [ReferencePhoto] {
+        references.filter(\.isCurated).sorted {
+            exploreOrderKey(for: $0.id) < exploreOrderKey(for: $1.id)
+        }
+    }
+
+    private let exploreOrderSeed = UInt64.random(in: .min ... .max)
+
+    private func exploreOrderKey(for id: UUID) -> Int {
+        var hasher = Hasher()
+        hasher.combine(exploreOrderSeed)
+        hasher.combine(id)
+        return hasher.finalize()
+    }
+
     /// Newest import first (`references` is already newest-first).
     var importedReferences: [ReferencePhoto] { references.filter { !$0.isCurated } }
 
@@ -354,6 +371,11 @@ class AppState: ObservableObject {
         defer { hasFinishedRestoringReferences = true }
         guard references.isEmpty else { return }
         // Utility: thumb decode must not outrank camera session startup.
+        // Remote Explore tags/subjects from the last good manifest (a few KB),
+        // so chips work before (or without) the network.
+        if let cached = RemoteReferenceFeed.loadCachedManifest() {
+            CuratedCatalog.setRemote(cached)
+        }
         let restored = await Task.detached(priority: .utility) { [store] in
             store.loadAll()
         }.value
@@ -428,6 +450,36 @@ class AppState: ObservableObject {
         }.value
         for (name, display, data) in prepared {
             addReference(ReferencePhoto(image: display, bundledAssetName: name), imageData: data)
+        }
+    }
+
+    /// Pulls new Explore references from `RemoteReferenceFeed` (once per
+    /// launch, after restore). Offline / failed fetch → no change. Entries
+    /// dropped from the manifest leave Explore unless favorited or active.
+    func syncRemoteReferences() async {
+        guard !hasSyncedRemoteReferences else { return }
+        hasSyncedRemoteReferences = true
+        guard let manifest = try? await RemoteReferenceFeed.fetchManifest() else { return }
+        CuratedCatalog.setRemote(manifest)
+
+        let liveKeys = Set(manifest.references.map { RemoteReferenceFeed.key(for: $0.id) })
+        let activeID = activeReference?.id
+        let retired = references.filter { photo in
+            guard let key = photo.bundledAssetName, RemoteReferenceFeed.isRemoteKey(key) else { return false }
+            return !liveKeys.contains(key) && !photo.isFavorite && photo.id != activeID
+        }
+        for photo in retired { removeReference(id: photo.id) }
+
+        // Imports insert at the top, so walk bottom-up to keep manifest order.
+        var have = Set(references.compactMap(\.bundledAssetName))
+        for entry in manifest.references.reversed() {
+            let key = RemoteReferenceFeed.key(for: entry.id)
+            guard !have.contains(key) else { continue }
+            guard let data = try? await RemoteReferenceFeed.fetchImageData(for: entry),
+                  let raw = await Task.detached(priority: .utility, operation: { UIImage(data: data) }).value
+            else { continue }
+            have.insert(key)
+            importReference(raw: raw, data: data, bundledAssetName: key)
         }
     }
 

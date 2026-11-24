@@ -2,9 +2,9 @@ import Foundation
 
 /// Bundled starter references for the cold-start empty state — the app is
 /// useless until a reference exists, and new users may have nothing saved.
-/// Original Gemini (Nano Banana) stills, bundled in Assets.xcassets so
-/// importing them stays fully offline. Fashion / travel poses the analyzer
-/// can guide against.
+/// Bundled in Assets.xcassets so first launch works fully offline. Newer
+/// Explore photos arrive through `RemoteReferenceFeed` without an app update;
+/// this pack stays the offline fallback.
 enum SampleReferencePack {
     static let assetNames = [
         "SampleRefCinqueFloral",
@@ -17,6 +17,15 @@ enum SampleReferencePack {
         "SampleRefCafeSip",
         "SampleRefStoneLean",
         "SampleRefSofaProfile",
+        "SampleRefVelvetBooth",
+        "SampleRefEspressoWindow",
+        "SampleRefStorefrontLean",
+        "SampleRefGardenPatio",
+        "SampleRefSunsetRail",
+        "SampleRefNightShore",
+        "SampleRefBalconyNight",
+        "SampleRefPierSunset",
+        "SampleRefCocktailToast",
     ]
 
     /// Hand-assigned Explore chips for the curated set (D-7; O-3). Curated
@@ -33,6 +42,15 @@ enum SampleReferencePack {
         "SampleRefCafeSip":         [.fullBody, .seated],
         "SampleRefStoneLean":       [.fullBody],
         "SampleRefSofaProfile":     [.fullBody, .seated],
+        "SampleRefVelvetBooth":     [.portraits, .seated],
+        "SampleRefEspressoWindow":  [.portraits, .seated],
+        "SampleRefStorefrontLean":  [.fullBody],
+        "SampleRefGardenPatio":     [.portraits, .seated],
+        "SampleRefSunsetRail":      [.portraits],
+        "SampleRefNightShore":      [.portraits],
+        "SampleRefBalconyNight":    [.portraits],
+        "SampleRefPierSunset":      [.portraits],
+        "SampleRefCocktailToast":   [.portraits, .seated],
     ]
 
     /// Explore's Women / Men toggle. Hand-assigned like `tags`.
@@ -48,5 +66,14 @@ enum SampleReferencePack {
         "SampleRefCafeSip":         .men,
         "SampleRefStoneLean":       .men,
         "SampleRefSofaProfile":     .men,
+        "SampleRefVelvetBooth":     .women,
+        "SampleRefEspressoWindow":  .men,
+        "SampleRefStorefrontLean":  .men,
+        "SampleRefGardenPatio":     .women,
+        "SampleRefSunsetRail":      .women,
+        "SampleRefNightShore":      .women,
+        "SampleRefBalconyNight":    .men,
+        "SampleRefPierSunset":      .men,
+        "SampleRefCocktailToast":   .women,
     ]
 }

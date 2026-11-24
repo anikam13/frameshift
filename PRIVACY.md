@@ -6,7 +6,9 @@ FrameShift is designed to work entirely on your device. This policy explains exa
 
 ## Information We Collect
 
-FrameShift does not collect, transmit, or store any information outside of your device. There are no accounts, no sign-in, and no network requests of any kind — the app has no backend server to send data to, even if it wanted to.
+FrameShift does not collect, transmit, or store any information outside of your device. There are no accounts and no sign-in, and the app has no backend server to send data to.
+
+The app makes one kind of network request: on launch it downloads the list of curated Explore reference photos, and any new photos on it, from a public website (anikam13.github.io). These are plain downloads of public files. Nothing about you, your device, or your photos is sent with them — no identifiers, cookies, or analytics. If you're offline, the app works normally with the photos it already has.
 
 ## Camera Access
 

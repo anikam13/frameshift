@@ -15,6 +15,7 @@ struct FrameShiftApp: App {
                 }
                 #endif
                 await appState.restoreReferences()
+                await appState.syncRemoteReferences()
             }
             .task {
                 await appState.restoreSessionFromPreviousLaunch()

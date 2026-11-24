@@ -60,7 +60,7 @@ struct GalleryHomeView: View {
                 .filter(filter.matches)
                 .filter { photo in
                     guard let subject else { return true }
-                    return photo.bundledAssetName.flatMap { SampleReferencePack.subjects[$0] } == subject
+                    return photo.bundledAssetName.flatMap(CuratedCatalog.subject(for:)) == subject
                 }
         case .yours:   return appState.importedReferences
         }

@@ -2,7 +2,7 @@
 
 iOS camera app that helps users recreate reference photos in real time. A user imports reference photos (from Photos — typically saved from Pinterest, Instagram, etc.), the app silently analyzes each one to extract a shot spec, and the live camera screen uses that spec to guide framing (head circle, level/tilt, zoom, coaching tips, reference ghost overlay).
 
-No backend. No account. Fully on-device. iOS 17+, iPhone-only.
+No backend. No account. On-device analysis; the only network call is the read-only Explore feed (`RemoteReferenceFeed`). iOS 17+, iPhone-only.
 
 App identity: product/target `FrameShift`, bundle ID `com.anirudhkamath.frameshift`.
 
@@ -221,10 +221,20 @@ Camera `⋯` → **Coaching Eval** shows live coach signals and event counts
 3. Missing / stale version (or pre-persistence manifests) → serial reanalyze
    (active first, yield for camera, then persist) — same queue as imports
 
-Cold start empty state: "Try sample references" runs 9 bundled Gemini
-(Nano Banana) stills (`Assets.xcassets/SampleRef*`, listed in
+### Remote Explore feed
+`RemoteReferenceFeed` fetches `https://anikam13.github.io/frameshift-explore/manifest.json`
+once per launch (after restore; `AppState.syncRemoteReferences`). New entries import
+through the normal pipeline with curated key `remote:<id>` in `bundledAssetName`
+(so they're Explore, not Yours); entries dropped from the manifest are removed
+unless favorited / active. Tags + Women/Men come from the manifest via
+`CuratedCatalog` (last good manifest cached in Application Support). Ephemeral
+session, no cookies/identifiers, skips Low Data Mode. Publish with
+`explore-feed/add-reference.sh` + `publish.sh` (see `explore-feed/README.md`).
+
+Cold start empty state: "Try sample references" runs the 19 bundled
+stills (`Assets.xcassets/SampleRef*`, listed in
 `Services/SampleReferencePack.swift`) through the import pipeline. Fully
-offline; the no-network rule holds.
+offline.
 
 ### Capture → save
 1. `CameraService.capturePhoto` → cropped `UIImage`
@@ -282,7 +292,7 @@ Import uses the system photo picker (no broad library read). Saving uses add-onl
 - No full Settings panel on the camera screen (tool drawer for guide toggles is OK; Settings stays on References)
 - No EXIF data display in UI (`ReferenceEXIF` is analysis-only; `CaptureInfoSheet` shows date/dimensions/reference thumb only)
 - No photo counter — except the session count badge (reversal, see below)
-- No account, login, or network calls of any kind
+- No account, login, or network calls — except the read-only Explore feed (a GET of a public manifest + photos, nothing sent about the user)
 - No third-party dependencies
 - No storyboards — SwiftUI only
 - No gamification copy
