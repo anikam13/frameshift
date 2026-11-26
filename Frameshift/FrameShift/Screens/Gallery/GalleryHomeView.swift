@@ -30,6 +30,11 @@ struct GalleryHomeView: View {
     /// moved, and whether this drag turned out to be horizontal.
     @State private var pageOffset: CGFloat = 0
     @State private var pageDragIsHorizontal: Bool?
+    /// True only while the page drag is live. Unlike `onEnded`, a
+    /// `@GestureState` also resets when the system *cancels* the drag (a
+    /// tile's context-menu press, the scroll view taking the touch) — without
+    /// it a cancelled drag left the scroll view disabled for good.
+    @GestureState private var pageDragLive = false
     @State private var isPaging = false
     /// A sideways drag that started on a tile must not also open it.
     @State private var suppressTileTap = false
@@ -86,7 +91,7 @@ struct GalleryHomeView: View {
                 }
             }
             .scrollIndicators(.hidden)
-            .scrollDisabled(pageDragIsHorizontal == true)
+            .scrollDisabled(pageDragLive && pageDragIsHorizontal == true)
         }
         .background(Color(.systemBackground).ignoresSafeArea())
         .overlayPreferenceValue(TourAnchorKey.self) { anchors in
@@ -356,6 +361,10 @@ struct GalleryHomeView: View {
                 }
             }
             .simultaneousGesture(pageDrag(width: width), including: tourStep == nil ? .all : .subviews)
+            .onChange(of: pageDragLive) { _, live in
+                guard !live else { return }
+                finishPageDrag()
+            }
     }
 
     /// 0 = Explore, 1 = Yours; drives the switch's thumb during a drag.
@@ -367,6 +376,7 @@ struct GalleryHomeView: View {
 
     private func pageDrag(width: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 12)
+            .updating($pageDragLive) { _, live, _ in live = true }
             .onChanged { value in
                 guard !isPaging else { return }
                 let t = value.translation
@@ -380,13 +390,8 @@ struct GalleryHomeView: View {
                 pageOffset = outward ? t.width * 0.2 : t.width
             }
             .onEnded { value in
-                defer {
-                    pageDragIsHorizontal = nil
-                    Task {
-                        try? await Task.sleep(for: .milliseconds(250))
-                        suppressTileTap = false
-                    }
-                }
+                // Cleanup (axis, tap suppression) runs in `finishPageDrag`,
+                // which also covers cancelled drags.
                 guard pageDragIsHorizontal == true, !isPaging else { return }
                 let travel = value.translation.width
                 let flick = value.predictedEndTranslation.width
@@ -398,6 +403,19 @@ struct GalleryHomeView: View {
                     withAnimation(.spring(duration: 0.3, bounce: 0)) { pageOffset = 0 }
                 }
             }
+    }
+
+    /// Runs when the page drag ends *or is cancelled*: clears the axis lock,
+    /// settles a half-dragged grid back, and re-arms tile taps.
+    private func finishPageDrag() {
+        pageDragIsHorizontal = nil
+        if !isPaging, pageOffset != 0 {
+            withAnimation(.spring(duration: 0.3, bounce: 0)) { pageOffset = 0 }
+        }
+        Task {
+            try? await Task.sleep(for: .milliseconds(250))
+            if !pageDragLive { suppressTileTap = false }
+        }
     }
 
     /// Slides the current grid out and the other in (tap or drag), then
