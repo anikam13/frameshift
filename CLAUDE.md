@@ -19,6 +19,7 @@ App identity: product/target `FrameShift`, bundle ID `com.anirudhkamath.frameshi
 | Photo import | PhotosUI — `PhotosPicker` |
 | Photo export / save | Photos — PHPhotoLibrary (add-only) |
 | Haptics | UIKit — UIImpactFeedbackGenerator |
+| Lock Screen / Control Center control | WidgetKit `ControlWidget` + AppIntents (`FrameShiftControls` extension, iOS 18+) |
 | UI | SwiftUI throughout |
 
 Do not use third-party dependencies. All required frameworks ship with iOS 17.
@@ -108,6 +109,10 @@ FrameShift/                                 // workspace root
         │   └── Settings/                   // from gallery `⋯` only
         ├── PrivacyInfo.xcprivacy
         └── Assets.xcassets
+    ├── FrameShiftControls/                // widget extension (iOS 18+), synced group
+    │   ├── FrameShiftControlsBundle.swift // ControlWidget; extension-only (excluded from app)
+    │   └── OpenCameraIntent.swift         // shared with the app target
+    └── FrameShiftControls-Info.plist       // NSExtension point (kept outside the synced folder)
 ```
 
 ---
@@ -240,6 +245,14 @@ offline.
 1. `CameraService.capturePhoto` → cropped `UIImage`
 2. `AppState.addCapturedShot` inserts display-sized image, writes a temporary JPEG to `SessionCaptureCache`, add-only save via `PhotoLibrarySaver` (failure → Try Again / Discard)
 3. Photos-denied → one-time non-blocking notice with Settings action
+
+### Open camera control (iOS 18+)
+`FrameShiftControls` ships one control, "FrameShift Camera", that users can put
+in a Lock Screen corner, Control Center or the Action button. It runs
+`OpenCameraIntent` (`openAppWhenRun`), which iOS performs in the app process;
+`CameraLaunchRequest` holds the request until `FrameShiftApp` switches
+`selectedTab` to `.camera` (skipped before the welcome screen is done). It
+unlocks first; no locked-camera capture extension (no swipe-to-open).
 
 ### Recreate
 Preview → **Recreate** sets the reference, switches to the (mounted) camera,

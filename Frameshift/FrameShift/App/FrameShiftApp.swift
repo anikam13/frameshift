@@ -7,6 +7,12 @@ struct FrameShiftApp: App {
         WindowGroup {
             RootTabView()
             .environmentObject(appState)
+            // Lock Screen / Control Center control (OpenCameraIntent). The
+            // intent can land before or after the first view, so check both.
+            .task { openCameraIfRequested() }
+            .onReceive(NotificationCenter.default.publisher(for: CameraLaunchRequest.notification)) { _ in
+                openCameraIfRequested()
+            }
             .task {
                 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("-uitest-seed-references") {
@@ -29,5 +35,12 @@ struct FrameShiftApp: App {
                 #endif
             }
         }
+    }
+
+    /// Skipped until the welcome screen is done, so first launch stays the same.
+    private func openCameraIfRequested() {
+        guard CameraLaunchRequest.consume(),
+              UserDefaults.standard.bool(forKey: Welcome.doneKey) else { return }
+        appState.selectedTab = .camera
     }
 }
